@@ -1,7 +1,5 @@
 #ifndef OPENSIM_PRESCRIBED_CONTROLLER_H_
 #define OPENSIM_PRESCRIBED_CONTROLLER_H_
-
-
 /* -------------------------------------------------------------------------- *
  *                      OpenSim:  PrescribedController.h                      *
  * -------------------------------------------------------------------------- *
@@ -11,7 +9,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Ajay Seth                                                       *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -58,7 +56,9 @@ public:
     /** (Optional) prescribed controls from a storage file  */
     OpenSim_DECLARE_OPTIONAL_PROPERTY(controls_file, std::string,
         "Controls storage (.sto) file containing controls for individual "
-        "actuators in the model. Column labels must match actuator names.");
+        "actuators in the model. Each column label must be either the name "
+        "of an actuator in the model's ForceSet or the absolute path to an "
+        "actuator anywhere in the model.");
 
     /** (Optional) interpolation method for controls in storage.  */
     OpenSim_DECLARE_OPTIONAL_PROPERTY(interpolation_method, int,
@@ -100,7 +100,7 @@ public:
                          SimTK::Vector& controls) const override;
 
     /**
-     *  Assign a prescribe control function for the desired actuator identified 
+     *  Assign a prescribed control function for the desired actuator identified 
      *  by its index. Controller takes ownership of the function.
      *  @param index                the actuator's index in the controller's set
      *  @param prescribedFunction   the actuator's control function
@@ -108,7 +108,7 @@ public:
     void prescribeControlForActuator(int index, Function *prescribedFunction);
 
     /**
-     *  Assign a prescribe control function for the desired actuator identified
+     *  Assign a prescribed control function for the desired actuator identified
      *  by its name. Controller takes ownership of the function.
      *  @param actName                the actuator's name in the controller's set
      *  @param prescribedFunction     the actuator's control function

@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Frank C. Anderson                                               *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -30,9 +30,6 @@
 // C++ INCLUDES
 #include "GCVSpline.h"
 #include "Constant.h"
-#include "PropertyInt.h"
-#include "PropertyDbl.h"
-#include "PropertyDblArray.h"
 #include "gcvspl.h"
 #include "XYFunctionInterface.h"
 
@@ -99,14 +96,14 @@ GCVSpline(int aDegree,int aN,const double *aX,const double *aF,
 
     // NUMBER OF DATA POINTS
     if(aN < getOrder()) {
-        printf("GCVSpline: ERROR- there must be %d or more data points.\n",
+        log_error("GCVSpline: there must be {} or more data points.",
             getOrder());
         return;
     }
 
     // CHECK DATA
     if((aX==NULL)||(aF==NULL)) {
-        printf("GCVSpline: ERROR- NULL arrays for data points encountered.\n");
+        log_error("GCVSpline: NULL arrays for data points encountered.");
         return;
     }
 
@@ -362,17 +359,17 @@ setDegree(int aDegree)
 
     // TOO SMALL
     if(_halfOrder<1) {
-        printf("GCVSpline.setDegree: WARN- invalid half order %d.\n",
-            _halfOrder);
-        printf("\tSetting degree = 1 (linear spline.)\n");
+        log_warn("GCVSpline.setDegree: invalid half order {}. Setting degree = "
+                 "1 (linear spline.)",
+                _halfOrder);
         _halfOrder = 1;
     }
 
     // TOO LARGE
     if(_halfOrder>4) {
-        printf("GCVSpline.setDegree: WARN- invalid half order %d.\n",
-            _halfOrder);
-        printf("\tSetting degree = 7 (heptic spline.)\n");
+        log_warn("GCVSpline.setDegree: invalid half order {}. Setting degree = "
+                 "7 (heptic spline.)",
+                _halfOrder);
         _halfOrder = 4;
     }
 }

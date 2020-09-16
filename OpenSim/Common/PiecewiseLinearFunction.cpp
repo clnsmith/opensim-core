@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Peter Loan                                                      *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -25,9 +25,7 @@
 // C++ INCLUDES
 #include "PiecewiseLinearFunction.h"
 #include "Constant.h"
-#include "PropertyInt.h"
-#include "PropertyDbl.h"
-#include "PropertyDblArray.h"
+#include "FunctionAdapter.h"
 #include "SimmMacros.h"
 #include "XYFunctionInterface.h"
 
@@ -77,17 +75,20 @@ PiecewiseLinearFunction::PiecewiseLinearFunction(int aN,const double *aX,const d
     setName(aName);
 
     // NUMBER OF DATA POINTS
-    if(aN < 2)
-    {
-        printf("PiecewiseLinearFunction: ERROR- there must be 2 or more data points.\n");
-        return;
-    }
+    OPENSIM_THROW_IF_FRMOBJ(aN < 2, Exception,
+            "PiecewiseLinearFunction: there must be 2 or more data "
+            "points, but got {} data points.",
+            aN);
 
     // CHECK DATA
-    if((aX==NULL)||(aY==NULL))
-    {
-        printf("PiecewiseLinearFunction: ERROR- NULL arrays for data points encountered.\n");
-        return;
+    OPENSIM_THROW_IF_FRMOBJ(aX == nullptr || aY == nullptr, Exception,
+        "x and/or y data is null.");
+
+    for (int i = 1; i < aN; ++i) {
+        OPENSIM_THROW_IF_FRMOBJ(aX[i] < aX[i - 1], Exception,
+                "Expected independent variable to be non-decreasing, but x[{}] "
+                "= {} is less than x[{}] = {}",
+                i, aX[i], i - 1, aX[i - 1]);
     }
 
     // INDEPENDENT VALUES (KNOT SEQUENCE)

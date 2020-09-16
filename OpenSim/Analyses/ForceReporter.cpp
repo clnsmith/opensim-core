@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Ayman Habib                                                     *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -25,12 +25,8 @@
 //=============================================================================
 // INCLUDES
 //=============================================================================
-#include <iostream>
-#include <string>
-#include <OpenSim/Simulation/Model/Model.h>
-#include <OpenSim/Simulation/Model/ForceSet.h>
-#include <OpenSim/Simulation/Model/ConstraintSet.h>
 #include "ForceReporter.h"
+#include <OpenSim/Simulation/Model/Model.h>
 
 using namespace OpenSim;
 using namespace std;
@@ -180,19 +176,17 @@ void ForceReporter::constructDescription()
 {
     char descrip[1024];
 
-    strcpy(descrip,"\nThis file contains the forces exerted on a model ");
-    strcat(descrip,"during a simulation.\n");
+    strcpy(descrip, "\nThis file contains the forces exerted on a model ");
+    strcat(descrip, "during a simulation.\n");
 
-    strcat(descrip,"\nA force is a generalized force, meaning that");
-    strcat(descrip," it can be either a force (N) or a torque (Nm).\n");
+    strcat(descrip, "\nA force is a generalized force, meaning that");
+    strcat(descrip, " it can be either a force (N) or a torque (Nm).\n");
 
-    strcat(descrip,"\nUnits are S.I. units (second, meters, Newtons, ...)");
-    if(getInDegrees()) {
-        strcat(descrip,"\nAngles are in degrees.");
-    } else {
-        strcat(descrip,"\nAngles are in radians.");
-    }
-    strcat(descrip,"\n\n");
+    strcat(descrip, "\nUnits are S.I. units (second, meters, Newtons, ...)");
+    strcat(descrip, "\nIf the header above contains a line with ");
+    strcat(descrip, "'inDegrees', this indicates whether rotational values ");
+    strcat(descrip, "are in degrees (yes) or radians (no).");
+    strcat(descrip, "\n\n");
 
     setDescription(descrip);
 }
@@ -217,7 +211,7 @@ void ForceReporter::constructColumnLabels(const SimTK::State& s)
         for(auto& force : forces) {
             // If body force we need to record six values for torque+force
             // If muscle we record one scalar
-            if (force.isDisabled(s)) continue; // Skip over disabled forces
+            if(!force.appliesForce(s)) continue; // Skip over disabled forces
             Array<string> forceLabels = force.getRecordLabels();
             // If prescribed force we need to record point, 
             columnLabels.append(forceLabels);
@@ -226,7 +220,8 @@ void ForceReporter::constructColumnLabels(const SimTK::State& s)
         if(_includeConstraintForces){
             auto constraints = _model->getComponentList<Constraint>();
             for(auto& c : constraints) {
-                if (c.isDisabled(s)) continue; // Skip over disabled constraints
+                if (!c.isEnforced(s))
+                    continue; // Skip over disabled constraints
                 // Ask constraint how many columns and their names it reports
                 Array<string> forceLabels = c.getRecordLabels();
                 // If prescribed force we need to record point, 
@@ -264,7 +259,7 @@ int ForceReporter::record(const SimTK::State& s)
     // MAKE SURE ALL ForceReporter QUANTITIES ARE VALID
     _model->getMultibodySystem().realize(s, SimTK::Stage::Dynamics );
 
-    StateVector nextRow = StateVector(s.getTime());
+    StateVector nextRow(s.getTime());
 
     // Model Forces
     auto forces = _model->getComponentList<Force>();
@@ -272,7 +267,7 @@ int ForceReporter::record(const SimTK::State& s)
     for(auto& force : forces) {
         // If body force we need to record six values for torque+force
         // If muscle we record one scalar
-        if (force.isDisabled(s)) continue;
+        if(!force.appliesForce(s)) continue;
         Array<double> values = force.getRecordValues(s);
         nextRow.getData().append(values);
     }
@@ -281,7 +276,8 @@ int ForceReporter::record(const SimTK::State& s)
         // Model Constraints
         auto constraints = _model->getComponentList<Constraint>();
         for (auto& constraint : constraints) {
-            if (constraint.isDisabled(s)) continue;
+            if (!constraint.isEnforced(s))
+                continue;
             Array<double> values = constraint.getRecordValues(s);
             nextRow.getData().append(values);
         }
@@ -305,8 +301,7 @@ int ForceReporter::record(const SimTK::State& s)
  *
  * @return -1 on error, 0 otherwise.
  */
-int ForceReporter::
-begin(SimTK::State& s)
+int ForceReporter::begin(const SimTK::State& s)
 {
     if(!proceed()) return(0);
 
@@ -340,8 +335,7 @@ begin(SimTK::State& s)
  *
  * @return -1 on error, 0 otherwise.
  */
-int ForceReporter::
-step(const SimTK::State& s, int stepNumber )
+int ForceReporter::step(const SimTK::State& s, int stepNumber )
 {
     if(!proceed( stepNumber )) return(0);
 
@@ -363,8 +357,7 @@ step(const SimTK::State& s, int stepNumber )
  *
  * @return -1 on error, 0 otherwise.
  */
-int ForceReporter::
-end(SimTK::State& s )
+int ForceReporter::end(const SimTK::State& s )
 {
     if (!proceed()) return 0;
 
@@ -399,8 +392,8 @@ printResults(const string &aBaseName,const string &aDir,double aDT,
                  const string &aExtension)
 {
     if(!getOn()) {
-        printf("ForceReporter.printResults: Off- not printing.\n");
-        return(0);
+        log_info("ForceReporter.printResults: Off- not printing.");
+        return 0;
     }
 
     std::string prefix=aBaseName+"_"+getName()+"_";
@@ -434,7 +427,7 @@ void ForceReporter::tidyForceNames()
             string newName(pad);
             _model->updForceSet()[i].setName(newName);
             forceNames.set(i, newName);
-            cout << "Changing blank name for force to " << newName << endl;
+            log_info("Changing blank name for force to {}.", newName);
         }
     }
 }

@@ -9,7 +9,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Frank C. Anderson                                               *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -30,12 +30,8 @@
 
 // INCLUDES
 #include "osimCommonDLL.h"
+#include <spdlog/common.h>
 #include <string>
-
-#ifdef WIN32
-#pragma warning(disable:4251) /*no DLL interface for type of member of exported class*/
-#pragma warning(disable:4275) /*no DLL interface for base class of exported class*/
-#endif
 
 #ifdef SWIG
     #ifdef OSIMCOMMON_API
@@ -71,7 +67,7 @@ auto result = getSomeResult();
 OPENSIM_THROW_IF(result != 5, ResultIsIncorrect, result, 5);
 @endcode
 @relates OpenSim::Exception                                                   */
-// These macros also allow us to add more details (eg class name) later easily.
+// These macros also allow us to add more details (e.g. class name) later easily.
 // Note -- Extra braces enclosing "if" are to avoid problems when these macros 
 // are called within if-else statements like:
 //           if(<some condition>)
@@ -103,7 +99,7 @@ information.                                                                  */
 /**
  * A class for basic exception functionality.
  * \if developer
- * To create exception classes in OpenSim, use the following guidlines.
+ * To create exception classes in OpenSim, use the following guidelines.
  * If the intention is to derive from an exception named, for example,
  * BaseException that is part of OpenSim, use the following blueprint:
  * \code{.cpp}
@@ -180,6 +176,31 @@ public:
               const Object& obj,
               const std::string& msg);
 
+    /** Use this when you want to throw an Exception (with OPENSIM_THROW or
+    OPENSIM_THROW_IF) and also provide a message that is formatted
+    using fmt::format() syntax. */
+    template <typename... Args>
+    Exception(const std::string& file,
+              size_t line,
+              const std::string& func,
+              spdlog::string_view_t fmt,
+              const Args&... args)
+            : Exception{file, line, func, fmt::format(fmt, args...)} {}
+
+    /** The message created by this constructor will contain the class name and
+    instance name of the provided Object, and also accepts a message formatted
+    using fmt::format() syntax. Use this when throwing an Exception directly.
+    Use OPENSIM_THROW_FRMOBJ and OPENSIM_THROW_IF_FRMOBJ macros at throw sites.
+    */
+    template <typename... Args>
+    Exception(const std::string& file,
+              size_t line,
+              const std::string& func,
+              const Object& obj,
+              spdlog::string_view_t fmt,
+              const Args&... args)
+            : Exception{file, line, func, obj, fmt::format(fmt, args...)} {}
+
     virtual ~Exception() throw() {}
 
 protected:
@@ -225,7 +246,7 @@ public:
                 const std::string& func,
                 const std::string& msg = "") :
         Exception(file, line, func) {
-        std::string mesg = "Invalid Argument. " + msg;
+        std::string mesg = "Invalid Call. " + msg;
 
         addMessage(mesg);
     }
@@ -275,6 +296,28 @@ public:
 };
 
 class IOError : public Exception {
+public:
+    using Exception::Exception;
+};
+
+class ComponentNotFound : public Exception {
+public:
+    using Exception::Exception;
+    ComponentNotFound(const std::string& file,
+        size_t line,
+        const std::string& func,
+        const std::string& toFindName,
+        const std::string& toFindClassName,
+        const std::string& thisName) :
+        Exception(file, line, func) {
+        std::string msg = "Component '" + thisName;
+        msg += "' could not find '" + toFindName;
+        msg += "' of type " + toFindClassName + ". ";
+        addMessage(msg);
+    }
+};
+
+class NonUniqueLabels : public OpenSim::Exception {
 public:
     using Exception::Exception;
 };

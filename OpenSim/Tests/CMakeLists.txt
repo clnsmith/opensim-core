@@ -1,6 +1,3 @@
-include_directories(${OpenSim_SOURCE_DIR}
-                    ${OpenSim_SOURCE_DIR}/Vendors)
-
 if(BUILD_TESTING)
     add_subdirectory(Components)
     add_subdirectory(AddComponents)
@@ -13,8 +10,11 @@ if(BUILD_TESTING)
     add_subdirectory(SimpleOptimizationExample)
     add_subdirectory(Environment)
     add_subdirectory(testIterators)
-    add_subdirectory(VisualizeModel)
     add_subdirectory(README)
     add_subdirectory(Wrapping)
+    add_subdirectory(ExampleLuxoMuscle)
+    add_subdirectory(AnalysisPluginExample)
+    add_subdirectory(BodyDragExample)
+    add_subdirectory(BuildDynamicWalker)
 endif()
 

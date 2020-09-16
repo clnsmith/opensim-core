@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Frank C. Anderson                                               *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -27,13 +27,13 @@
 
 
 // INCLUDES
-#include "osimCommonDLL.h"
-#include <time.h>
+#include "IO.h"
+
+#include "Logger.h"
+#include <climits>
 #include <math.h>
 #include <string>
-#include <climits>
-
-#include "IO.h"
+#include <time.h>
 #if defined(__linux__) || defined(__APPLE__)
     #include <sys/stat.h>
     #include <sys/types.h>
@@ -108,7 +108,7 @@ FixSlashesInFilePath(const std::string &path)
 {
     std::string fixedPath = path;
     for(unsigned int i=0;i<fixedPath.length();i++) {
-#ifdef WIN32
+#ifdef _WIN32
         if(fixedPath[i] == '/') fixedPath[i] = '\\';
 #else
         if(fixedPath[i] == '\\') fixedPath[i] = '/';
@@ -419,6 +419,10 @@ ReadCharacters(istream &aIS,int aNChar)
     return str;
 }
 
+bool IO::FileExists(const std::string& filePath) {
+    return std::ifstream(filePath).good();
+}
+
 //_____________________________________________________________________________
 /**
  * Open a file.
@@ -431,8 +435,8 @@ OpenFile(const string &aFileName,const string &aMode)
     // OPEN THE FILE
     fp = fopen(aFileName.c_str(),aMode.c_str());
     if(fp==NULL) {
-        printf("IO.OpenFile(const string&,const string&): failed to open %s\n",
-         aFileName.c_str());
+        log_error("IO.OpenFile(const string&,const string&): "
+                  "failed to open {}.", aFileName);
         return(NULL);
     }
 
@@ -447,7 +451,8 @@ OpenInputFile(const string &aFileName,ios_base::openmode mode)
 {
     ifstream *fs = new ifstream(aFileName.c_str(), ios_base::in | mode);
     if(!fs || !(*fs)) {
-        printf("IO.OpenInputFile(const string&,openmode mode): failed to open %s\n", aFileName.c_str());
+        log_error("IO.OpenInputFile(const string&,openmode mode): "
+                  "failed to open {}.", aFileName);
         return(NULL);
     }
 
@@ -458,7 +463,8 @@ OpenOutputFile(const string &aFileName,ios_base::openmode mode)
 {
     ofstream *fs = new ofstream(aFileName.c_str(), ios_base::out | mode);
     if(!fs || !(*fs)) {
-        printf("IO.OpenOutputFile(const string&,openmode mode): failed to open %s\n", aFileName.c_str());
+        log_error("IO.OpenOutputFile(const string&,openmode mode): failed to "
+                  "open {}.", aFileName);
         return(NULL);
     }
 
@@ -645,4 +651,87 @@ Uppercase(const std::string &aStr)
     std::string result = aStr;
     for(unsigned int i=0; i<aStr.size(); i++) result[i] = toupper(result[i]);
     return result;
+}
+
+bool IO::StartsWith(const std::string& string, const std::string& start) {
+    // https://stackoverflow.com/questions/874134/find-if-string-ends-with-another-string-in-c
+    if (string.length() >= start.length()) {
+        return string.compare(0, start.length(), start) == 0;
+    }
+    return false;
+}
+
+bool IO::EndsWith(const std::string& string, const std::string& ending) {
+    // https://stackoverflow.com/questions/874134/find-if-string-ends-with-another-string-in-c
+    if (string.length() >= ending.length()) {
+        return string.compare(string.length() - ending.length(),
+                              ending.length(), ending) == 0;
+    }
+    return false;
+}
+
+bool IO::StartsWithIgnoringCase(
+        const std::string& string, const std::string& start) {
+    return StartsWith(IO::Lowercase(string), IO::Lowercase(start));
+}
+
+bool IO::EndsWithIgnoringCase(
+        const std::string& string, const std::string& ending) {
+    return EndsWith(IO::Lowercase(string), IO::Lowercase(ending));
+}
+
+void IO::eraseEmptyElements(std::vector<std::string>& list)
+{
+    std::vector<std::string>::iterator it = list.begin();
+    while (it != list.end()) {
+        if (it->empty())
+            it = list.erase(it);
+        else
+            ++it;
+    }
+}
+
+IO::CwdChanger::CwdChanger() {
+}
+
+IO::CwdChanger::CwdChanger(const std::string& newDir) :
+    _existingDir{getCwd()} {
+
+    chDir(newDir);
+}
+
+IO::CwdChanger IO::CwdChanger::noop() {
+    return CwdChanger{};
+}
+
+IO::CwdChanger IO::CwdChanger::changeTo(const std::string& newDir) {
+    return CwdChanger{newDir};
+}
+
+IO::CwdChanger IO::CwdChanger::changeToParentOf(const std::string& path) {
+    return changeTo(getParentDirectory(path));
+}
+
+// a custom move constructor is necessary because the default move
+// constructor, which effectively calls `this->_existingDir{std::move(tmp._existingDir)}`
+// is specified to leave `tmp._existingDir` in an unspecified state:
+//
+// from: https://en.cppreference.com/w/cpp/string/basic_string/basic_string
+//
+// > Move constructor. Constructs the string with the contents of
+// > other using move semantics. other is left in valid, but
+// > unspecified state
+//
+// `~CwdChanger` requires that `tmp._existingDir.empty() == true`; otherwise,
+// destruction of the temporary will cause a directory change.
+IO::CwdChanger::CwdChanger(IO::CwdChanger&& tmp) :
+    _existingDir{} {
+
+    std::swap(this->_existingDir, tmp._existingDir);
+}
+
+IO::CwdChanger::~CwdChanger() noexcept {
+    if (!_existingDir.empty()) {
+        chDir(_existingDir);
+    }
 }

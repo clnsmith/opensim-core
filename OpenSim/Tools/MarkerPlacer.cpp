@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Peter Loan                                                      *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -25,19 +25,19 @@
 // INCLUDES
 //=============================================================================
 #include "MarkerPlacer.h"
-#include <OpenSim/Common/MarkerData.h>
 #include <OpenSim/Common/Storage.h>
 #include <OpenSim/Common/FunctionSet.h>
 #include <OpenSim/Common/GCVSplineSet.h>
 #include <OpenSim/Common/Constant.h>
+#include <OpenSim/Common/MarkerData.h>
 #include <OpenSim/Simulation/InverseKinematicsSolver.h>
 #include <OpenSim/Simulation/Model/Model.h>
-#include <OpenSim/Simulation/Model/MarkerSet.h>
-#include <OpenSim/Simulation/Model/Marker.h>
 #include <OpenSim/Simulation/MarkersReference.h>
 #include <OpenSim/Simulation/CoordinateReference.h>
 #include "IKCoordinateTask.h"
+#include "IKTaskSet.h"
 #include <OpenSim/Analyses/StatesReporter.h>
+#include <OpenSim/Common/IO.h>
 //=============================================================================
 // STATICS
 //=============================================================================
@@ -236,7 +236,7 @@ bool MarkerPlacer::processModel(Model* aModel,
 
     if(!getApply()) return false;
 
-    cout << endl << "Step 3: Placing markers on model" << endl;
+    log_info("Step 3: Placing markers on model");
 
     if (_timeRange.getSize()<2) 
         throw Exception("MarkerPlacer::processModel, time_range is unspecified.");
@@ -244,6 +244,45 @@ bool MarkerPlacer::processModel(Model* aModel,
     /* Load the static pose marker file, and average all the
     * frames in the user-specified time range.
     */
+    TimeSeriesTableVec3 staticPoseTable{aPathToSubject + _markerFileName};
+    const auto& timeCol = staticPoseTable.getIndependentColumn();
+
+    // Users often set a time range that purposely exceeds the range of
+    // their data with the mindset that all their data will be used.
+    // To allow for that, we have to narrow the provided range to data
+    // range, since the TimeSeriesTable will correctly throw that the 
+    // desired time exceeds the data range.
+    if (_timeRange[0] < timeCol.front())
+        _timeRange[0] = timeCol.front();
+    if (_timeRange[1] > timeCol.back())
+        _timeRange[1] = timeCol.back();
+
+    const auto avgRow = staticPoseTable.averageRow(_timeRange[0],
+                                                   _timeRange[1]);
+    for(size_t r = staticPoseTable.getNumRows(); r-- > 0; )
+        staticPoseTable.removeRowAtIndex(r);
+    staticPoseTable.appendRow(_timeRange[0], avgRow);
+    
+    OPENSIM_THROW_IF(!staticPoseTable.hasTableMetaDataKey("Units"),
+                     Exception,
+                     "MarkerPlacer::processModel -- Marker file does not have "
+                     "'Units'.");
+    Units
+    staticPoseUnits{staticPoseTable.getTableMetaData<std::string>("Units")};
+    double scaleFactor = staticPoseUnits.convertTo(aModel->getLengthUnits());
+    OPENSIM_THROW_IF(SimTK::isNaN(scaleFactor),
+                     Exception,
+                     "Model has unspecified units.");
+    if(std::fabs(scaleFactor - 1) >= SimTK::Eps) {
+        for(unsigned r = 0; r < staticPoseTable.getNumRows(); ++r)
+            staticPoseTable.updRowAtIndex(r) *= scaleFactor;
+
+        staticPoseUnits = aModel->getLengthUnits();
+        staticPoseTable.removeTableMetaDataKey("Units");
+        staticPoseTable.addTableMetaData("Units",
+                                         staticPoseUnits.getAbbreviation());
+    }
+    
     MarkerData* staticPose = new MarkerData(aPathToSubject + _markerFileName);
     staticPose->averageFrames(_maxMarkerMovement, _timeRange[0], _timeRange[1]);
     staticPose->convertToUnits(aModel->getLengthUnits());
@@ -255,12 +294,13 @@ bool MarkerPlacer::processModel(Model* aModel,
 
     // Construct the system and get the working state when done changing the model
     SimTK::State& s = aModel->initSystem();
+    s.updTime() = _timeRange[0];
     
     // Create references and WeightSets needed to initialize InverseKinemaicsSolver
     Set<MarkerWeight> markerWeightSet;
     _ikTaskSet.createMarkerWeightSet(markerWeightSet); // order in tasks file
     // MarkersReference takes ownership of marker data (staticPose)
-    MarkersReference markersReference(staticPose, &markerWeightSet);
+    MarkersReference markersReference(staticPoseTable, markerWeightSet);
     SimTK::Array_<CoordinateReference> coordinateReferences;
 
     // Load the coordinate data
@@ -278,21 +318,21 @@ bool MarkerPlacer::processModel(Model* aModel,
     for(int i=0; i< _ikTaskSet.getSize(); i++){
         IKCoordinateTask *coordTask = dynamic_cast<IKCoordinateTask *>(&_ikTaskSet[i]);
         if (coordTask && coordTask->getApply()){
-            CoordinateReference *coordRef = NULL;
+            std::unique_ptr<CoordinateReference> coordRef{};
             if(coordTask->getValueType() == IKCoordinateTask::FromFile){
                 index = coordFunctions->getIndex(coordTask->getName(), index);
                 if(index >= 0){
-                    coordRef = new CoordinateReference(coordTask->getName(),coordFunctions->get(index));
+                    coordRef.reset(new CoordinateReference(coordTask->getName(),coordFunctions->get(index)));
                 }
             }
             else if((coordTask->getValueType() == IKCoordinateTask::ManualValue)){
                 Constant reference(Constant(coordTask->getValue()));
-                coordRef = new CoordinateReference(coordTask->getName(), reference);
+                coordRef.reset(new CoordinateReference(coordTask->getName(), reference));
             }
             else{ // assume it should be held at its current/default value
                 double value = aModel->getCoordinateSet().get(coordTask->getName()).getValue(s);
                 Constant reference = Constant(value);
-                coordRef = new CoordinateReference(coordTask->getName(), reference);
+                coordRef.reset(new CoordinateReference(coordTask->getName(), reference));
             }
 
             if(coordRef == NULL)
@@ -327,10 +367,12 @@ bool MarkerPlacer::processModel(Model* aModel,
             worst = j;
         }
     }
-    cout << "Frame at (t=" << s.getTime() << "):\t";
-    cout << "total squared error = " << totalSquaredMarkerError;
-    cout << ", marker error: RMS=" << sqrt(totalSquaredMarkerError/nm);
-    cout << ", max=" << sqrt(maxSquaredMarkerError) << " (" << ikSol.getMarkerNameForIndex(worst) << ")" << endl;
+    log_info("Frame at (t = {}):\t total squared error = {}, "
+             "marker error: RMS = {}, max = {} ({})",
+            s.getTime(), totalSquaredMarkerError,
+            sqrt(totalSquaredMarkerError/nm),
+            sqrt(maxSquaredMarkerError),
+            ikSol.getMarkerNameForIndex(worst));
     /* Now move the non-fixed markers on the model so that they are coincident
      * with the measured markers in the static pose. The model is already in
      * the proper configuration so the coordinates do not need to be changed.
@@ -345,31 +387,36 @@ bool MarkerPlacer::processModel(Model* aModel,
     
     _outputStorage.reset(new Storage(statesReporter.updStatesStorage()));
     _outputStorage->setName("static pose");
-    //_outputStorage->print("statesReporterOutput.sto");
-    Storage markerStorage;
-    staticPose->makeRdStorage(*_outputStorage);
     _outputStorage->getStateVector(0)->setTime(s.getTime());
-    statesReporter.updStatesStorage().addToRdStorage(*_outputStorage, s.getTime(), s.getTime());
-    //_outputStorage->print("statesReporterOutputWithMarkers.sto");
 
     if(_printResultFiles) {
-        if (!_outputModelFileNameProp.getValueIsDefault())
-        {
-            aModel->print(aPathToSubject + _outputModelFileName);
-            cout << "Wrote model file " << _outputModelFileName << " from model " << aModel->getName() << endl;
-        }
+        std::string savedCwd = IO::getCwd();
+        IO::chDir(aPathToSubject);
 
-        if (!_outputMarkerFileNameProp.getValueIsDefault())
-        {
-            aModel->writeMarkerFile(aPathToSubject + _outputMarkerFileName);
-            cout << "Wrote marker file " << _outputMarkerFileName << " from model " << aModel->getName() << endl;
+        try { // writing can throw an exception
+            if (_outputModelFileNameProp.isValidFileName()) {
+                aModel->print(aPathToSubject + _outputModelFileName);
+                log_info("Wrote model file '{}' from model {}.", 
+                    _outputModelFileName, aModel->getName());
+            }
+
+            if (_outputMarkerFileNameProp.isValidFileName()) {
+                aModel->writeMarkerFile(aPathToSubject + _outputMarkerFileName);
+                log_info("Wrote marker file '{}' from model {}.", 
+                    _outputMarkerFileName, aModel->getName());
+            }
+
+            if (_outputMotionFileNameProp.isValidFileName()) {
+                _outputStorage->print(aPathToSubject + _outputMotionFileName,
+                    "w", "File generated from solving marker data for model "
+                    + aModel->getName());
+            }
+        } // catch the exception so we can reset the working directory
+        catch (std::exception& ex) {
+            IO::chDir(savedCwd);
+            OPENSIM_THROW_FRMOBJ(Exception, ex.what());
         }
-        
-        if (!_outputMotionFileNameProp.getValueIsDefault())
-        {
-            _outputStorage->print(aPathToSubject + _outputMotionFileName, 
-                "w", "File generated from solving marker data for model "+aModel->getName());
-        }
+        IO::chDir(savedCwd);
     }
 
     return true;
@@ -399,7 +446,7 @@ void MarkerPlacer::moveModelMarkersToPose(SimTK::State& s, Model& aModel,
     {
         Marker& modelMarker = markerSet.get(i);
 
-        if (true/*!modelMarker.getFixed()*/)
+        if (!modelMarker.get_fixed())
         {
             int index = aPose.getMarkerIndex(modelMarker.getName());
             if (index >= 0)
@@ -411,19 +458,22 @@ void MarkerPlacer::moveModelMarkersToPose(SimTK::State& s, Model& aModel,
                     Vec3 globalPt = globalMarker;
                     double conversionFactor = aPose.getUnits().convertTo(aModel.getLengthUnits());
                     pt = conversionFactor*globalPt;
-                    pt2 = modelMarker.getParentFrame().findLocationInAnotherFrame(s, pt, aModel.getGround());
+                    pt2 = aModel.getGround().findStationLocationInAnotherFrame(s, pt, modelMarker.getParentFrame());
                     modelMarker.set_location(pt2);
                 }
                 else
                 {
-                    cout << "___WARNING___: marker " << modelMarker.getName() << " does not have valid coordinates in " << aPose.getFileName() << endl;
-                    cout << "               It will not be moved to match location in marker file." << endl;
+                    log_warn("Marker {} does not have valid coordinates in "
+                             "'{}'. It will not be moved to match location in "
+                             "marker file.", 
+                        modelMarker.getName(), aPose.getFileName());
                 }
             }
         }
     }
 
-    cout << "Moved markers in model " << aModel.getName() << " to match locations in marker file " << aPose.getFileName() << endl;
+    log_info("Moved markers in model {} to match locations in marker file "
+             "'{}'.", aModel.getName(), aPose.getFileName());
 }
 
 Storage* MarkerPlacer::getOutputStorage() 

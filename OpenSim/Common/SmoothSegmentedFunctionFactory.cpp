@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Matthew Millard                                                 *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -298,7 +298,7 @@ SmoothSegmentedFunction* SmoothSegmentedFunctionFactory::
         "%s: dydxE must be greater than or equal to 0"
         "and less than fmaxE-1 (%f)",curveName.c_str(),(fmaxE-1));
     SimTK_ERRCHK2_ALWAYS( (dydxNearE >= dydxE && dydxNearE < (fmaxE-1)), 
-        "SmoothSegmentedFunctionFactory::createFiberForceVelocityCurve",
+        "SmoothSegmentedFunctionFactory::createFiberForceVelocityInverseCurve",
         "%s: dydxNearE must be greater than or equal to dydxE"
         "and less than fmaxE-1 (%f)",curveName.c_str(),(fmaxE-1));
     SimTK_ERRCHK1_ALWAYS( (concCurviness <= 1.0 && concCurviness >= 0), 

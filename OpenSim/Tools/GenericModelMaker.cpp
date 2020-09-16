@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Peter Loan                                                      *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -26,7 +26,6 @@
 //=============================================================================
 #include "GenericModelMaker.h"
 #include <OpenSim/Simulation/Model/Model.h>
-#include <OpenSim/Simulation/Model/Marker.h>
 
 //=============================================================================
 // STATICS
@@ -156,7 +155,7 @@ Model* GenericModelMaker::processModel(const string& aPathToSubject) const
 {
     Model* model = NULL;
 
-    cout << endl << "Step 1: Loading generic model" << endl;
+    log_info("Step 1: Loading generic model");
 
     try
     {
@@ -164,14 +163,15 @@ Model* GenericModelMaker::processModel(const string& aPathToSubject) const
         model->initSystem();
 
         if (!_markerSetFileNameProp.getValueIsDefault() && _markerSetFileName !="Unassigned") {
-            cout << "Loading marker set from '" << aPathToSubject+_markerSetFileName+"'" << endl;
-            MarkerSet *markerSet = new MarkerSet(*model, aPathToSubject + _markerSetFileName);
+            log_info("Loading marker set from '{}'.", 
+                aPathToSubject + _markerSetFileName);
+            MarkerSet *markerSet = new MarkerSet(aPathToSubject + _markerSetFileName);
             model->updateMarkerSet(*markerSet);
         }
     }
     catch (const Exception& x)
     {
-        x.print(cout);
+        log_error(x.what());
         return NULL;
     }
 

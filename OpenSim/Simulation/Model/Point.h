@@ -9,7 +9,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2016 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Ajay Seth                                                       *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -24,7 +24,6 @@
  * -------------------------------------------------------------------------- */
 
 // INCLUDE
-#include <OpenSim/Simulation/osimSimulationDLL.h>
 #include <OpenSim/Simulation/Model/ModelComponent.h>
 
 namespace OpenSim {
@@ -146,14 +145,13 @@ protected:
         Point types override these Component methods. */
     /**@{**/
     void extendAddToSystem(SimTK::MultibodySystem& system) const override;
-    void extendRealizeTopology(SimTK::State& s) const override;
     /**@}**/
 
 private:
 
-    mutable SimTK::ResetOnCopy<SimTK::CacheEntryIndex> _locationIndex;
-    mutable SimTK::ResetOnCopy<SimTK::CacheEntryIndex> _velocityIndex;
-    mutable SimTK::ResetOnCopy<SimTK::CacheEntryIndex> _accelerationIndex;
+    mutable CacheVariable<SimTK::Vec3> _locationCV;
+    mutable CacheVariable<SimTK::Vec3> _velocityCV;
+    mutable CacheVariable<SimTK::Vec3> _accelerationCV;
 
 //=============================================================================
 };  // END of class Point

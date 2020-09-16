@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Frank C. Anderson                                               *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -35,7 +35,6 @@
 
 #include "Model/AnalysisSet.h"
 #include "Model/ForceSet.h"
-#include "Model/FrameSet.h"
 #include "Model/BodyScale.h"
 #include "Model/BodyScaleSet.h"
 #include "Model/BodySet.h"
@@ -49,7 +48,9 @@
 #include "Model/CoordinateSet.h"
 #include "Model/ElasticFoundationForce.h"
 #include "Model/HuntCrossleyForce.h"
+#include "Model/SmoothSphereHalfSpaceForce.h"
 #include "Model/Ligament.h"
+#include "Model/Blankevoort1991Ligament.h"
 #include "Model/JointSet.h"
 #include "Model/Marker.h"
 #include "Model/Station.h"
@@ -79,13 +80,13 @@
 #include "Model/Appearance.h"
 #include "Model/Geometry.h"
 #include "Model/ModelVisualPreferences.h"
+#include "Model/ExpressionBasedCoordinateForce.h"
 
 #include "Control/ControlSet.h"
 #include "Control/ControlSetController.h"
 #include "Control/ControlConstant.h"
 #include "Control/ControlLinear.h"
 #include "Control/PrescribedController.h"
-#include "Control/ToyReflexController.h"
 
 #include "Wrap/PathWrap.h"
 #include "Wrap/PathWrapSet.h"
@@ -121,7 +122,8 @@
 #include "SimbodyEngine/TransformAxis.h"
 #include "SimbodyEngine/Coordinate.h"
 #include "SimbodyEngine/SpatialTransform.h"
-
+#include "OpenSense/IMUPlacer.h"
+#include "OrientationsReference.h"
 #include "StatesTrajectoryReporter.h"
 
 #include <string>
@@ -146,7 +148,6 @@ OSIMSIMULATION_API void RegisterTypes_osimSimulation()
     Object::registerType( Model() );
     Object::registerType( BodyScale() );
     Object::registerType( BodyScaleSet());
-    Object::registerType( FrameSet());
     Object::registerType( BodySet());
     Object::registerType( ComponentSet() );
     Object::registerType( ControllerSet() );
@@ -164,7 +165,6 @@ OSIMSIMULATION_API void RegisterTypes_osimSimulation()
     Object::registerType( ConditionalPathPoint() );
     Object::registerType( MovingPathPoint() );
     Object::registerType( SurfaceProperties());
-    Object::registerType( CurveProperties());
     Object::registerType( Appearance());
     Object::registerType( ModelVisualPreferences());
 
@@ -228,6 +228,7 @@ OSIMSIMULATION_API void RegisterTypes_osimSimulation()
     Object::registerType( ContactMesh() );
     Object::registerType( ContactSphere() );
     Object::registerType( CoordinateLimitForce() );
+    Object::registerType( SmoothSphereHalfSpaceForce() );
     Object::registerType( HuntCrossleyForce() );
     Object::registerType( ElasticFoundationForce() );
     Object::registerType( HuntCrossleyForce::ContactParameters() );
@@ -236,6 +237,7 @@ OSIMSIMULATION_API void RegisterTypes_osimSimulation()
     Object::registerType( ElasticFoundationForce::ContactParametersSet() );
 
     Object::registerType( Ligament() );
+    Object::registerType( Blankevoort1991Ligament() );
     Object::registerType( PrescribedForce() );
     Object::registerType( ExternalForce() );
     Object::registerType( PointToPointSpring() );
@@ -244,29 +246,27 @@ OSIMSIMULATION_API void RegisterTypes_osimSimulation()
     Object::registerType( BushingForce() );
     Object::registerType( FunctionBasedBushingForce() );
     Object::registerType( ExpressionBasedBushingForce() );
+    Object::registerType( ExpressionBasedCoordinateForce() );
 
     Object::registerType( ControlSetController() );
     Object::registerType( PrescribedController() );
-    Object::registerType( ToyReflexController() );
 
     Object::registerType( PathActuator() );
     Object::registerType( ProbeSet() );
     Object::registerType( JointInternalPowerProbe() );
     Object::registerType( SystemEnergyProbe() );
+    Object::registerType( ActuatorForceProbe() );
     Object::registerType( Umberger2010MuscleMetabolicsProbe() );
     Object::registerType( Umberger2010MuscleMetabolicsProbe_MetabolicMuscleParameterSet() );
     Object::registerType( Umberger2010MuscleMetabolicsProbe_MetabolicMuscleParameter() );
     Object::registerType( Bhargava2004MuscleMetabolicsProbe() );
     Object::registerType( Bhargava2004MuscleMetabolicsProbe_MetabolicMuscleParameterSet() );
     Object::registerType( Bhargava2004MuscleMetabolicsProbe_MetabolicMuscleParameter() );
+    Object::registerType( OrientationWeight() );
 
+    Object::registerType( IMUPlacer() );
+    
     Object::registerType( StatesTrajectoryReporter() );
-
-    // Register commonly used Connectors for de/serialization
-    Object::registerType(Connector<Frame>());
-    Object::registerType(Connector<PhysicalFrame>());
-    Object::registerType(Connector<Body>());
-    Object::registerType(Connector<Coordinate>());
 
     // OLD Versions
     // Associate an instance with old name to help deserialization.

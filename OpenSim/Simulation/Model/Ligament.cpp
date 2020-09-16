@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2013 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Peter Loan                                                      *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -36,7 +36,7 @@ using namespace std;
 using namespace OpenSim;
 using SimTK::Vec3;
 
-static const Vec3 DefaultLigamentColor(.9,.9,.9); // mostly white 
+static const Vec3 DefaultLigamentColor(0, 1, 0); // Green for backward compatibility 
 
 //=============================================================================
 // CONSTRUCTOR(S) AND DESTRUCTOR
@@ -96,7 +96,7 @@ void Ligament::extendFinalizeFromProperties()
 void Ligament::extendRealizeDynamics(const SimTK::State& state) const {
     Super::extendRealizeDynamics(state); // Mandatory first line
 
-    if(!isDisabled(state)){
+    if(appliesForce(state)){
         const SimTK::Vec3 color = computePathColor(state);
         if (!color.isNaN())
             getGeometryPath().setColor(state, color);
@@ -124,8 +124,9 @@ SimTK::Vec3 Ligament::computePathColor(const SimTK::State& state) const {
 {
     Super::extendAddToSystem(system);
     // Cache the computed tension and strain of the ligament
-    addCacheVariable<double>("tension", 0.0, SimTK::Stage::Velocity);
-    addCacheVariable<double>("strain", 0.0, SimTK::Stage::Velocity);
+
+    this->_tensionCV = addCacheVariable("tension", 0.0, SimTK::Stage::Velocity);
+    this->_strainCV = addCacheVariable("strain", 0.0, SimTK::Stage::Velocity);
 }
 
 
@@ -185,64 +186,27 @@ bool Ligament::setForceLengthCurve(const Function& aForceLengthCurve)
     set_force_length_curve(aForceLengthCurve);
     return true;
 }
-//=============================================================================
+//==============================================================================
 // SCALING
-//=============================================================================
-//_____________________________________________________________________________
-/**
- * Perform computations that need to happen before the ligament is scaled.
- * For this object, that entails calculating and storing the
- * length in the current body position.
- *
- * @param aScaleSet XYZ scale factors for the bodies.
- */
-void Ligament::preScale(const SimTK::State& s, const ScaleSet& aScaleSet)
+//==============================================================================
+void Ligament::extendPostScale(const SimTK::State& s, const ScaleSet& scaleSet)
 {
-    updGeometryPath().preScale(s, aScaleSet);
-}
+    Super::extendPostScale(s, scaleSet);
 
-//_____________________________________________________________________________
-/**
- * Scale the ligament.
- *
- * @param aScaleSet XYZ scale factors for the bodies
- * @return Whether or not the ligament was scaled successfully
- */
-void Ligament::scale(const SimTK::State& s, const ScaleSet& aScaleSet)
-{
-    updGeometryPath().scale(s, aScaleSet);
-}
-
-//_____________________________________________________________________________
-/**
- * Perform computations that need to happen after the ligament is scaled.
- * For this object, that entails comparing the length before and after scaling,
- * and scaling the resting length a proportional amount.
- *
- * @param aScaleSet XYZ scale factors for the bodies.
- */
-void Ligament::postScale(const SimTK::State& s, const ScaleSet& aScaleSet)
-{
-    GeometryPath& path          = updGeometryPath();
-    double&       restingLength = upd_resting_length();
-
-    path.postScale(s, aScaleSet);
-
+    GeometryPath& path = upd_GeometryPath();
     if (path.getPreScaleLength(s) > 0.0)
     {
         double scaleFactor = path.getLength(s) / path.getPreScaleLength(s);
+        upd_resting_length() *= scaleFactor;
 
-        // Scale resting length by the same amount as the change in
-        // total ligament length (in the current body position).
-        restingLength *= scaleFactor;
-
+        // Clear the pre-scale length that was stored in the GeometryPath.
         path.setPreScaleLength(s, 0.0);
     }
 }
 
 const double& Ligament::getTension(const SimTK::State& s) const
 {
-    return getCacheVariableValue<double>(s, "tension"); 
+    return getCacheVariableValue(s, _tensionCV);
 }
 
 
@@ -270,14 +234,14 @@ void Ligament::computeForce(const SimTK::State& s,
     double force = 0;
 
     if (path.getLength(s) <= restingLength){
-        setCacheVariableValue<double>(s, "tension", force);
+        setCacheVariableValue(s, _tensionCV, force);
         return;
     }
     
     // evaluate normalized tendon force length curve
     force = getForceLengthCurve().calcValue(
         SimTK::Vector(1, path.getLength(s)/restingLength))* pcsaForce;
-    setCacheVariableValue<double>(s, "tension", force);
+    setCacheVariableValue(s, _tensionCV, force);
 
     OpenSim::Array<PointForceDirection*> PFDs;
     path.getPointForceDirections(s, &PFDs);

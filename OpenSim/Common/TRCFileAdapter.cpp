@@ -1,11 +1,15 @@
 #include "TRCFileAdapter.h"
+#include <OpenSim/Common/IO.h>
 #include <fstream>
+#include <iomanip>
 
 namespace OpenSim {
 
+const std::string TRCFileAdapter::_headerDelimiters{ " \t\r" };
 const std::string TRCFileAdapter::_markers{"markers"};
 const std::string TRCFileAdapter::_delimiterWrite{"\t"};
-const std::string TRCFileAdapter::_delimitersRead{" \t"};
+// Get rid of the extra \r if parsing a file with CRLF line endings.
+const std::string TRCFileAdapter::_delimitersRead{"\t\r"};
 const std::string TRCFileAdapter::_frameNumColumnLabel{"Frame#"};
 const std::string TRCFileAdapter::_timeColumnLabel{"Time"};
 const std::string TRCFileAdapter::_xLabel{"X"};
@@ -23,12 +27,6 @@ TRCFileAdapter::clone() const {
     return new TRCFileAdapter{*this};
 }
 
-TimeSeriesTableVec3
-TRCFileAdapter::read(const std::string& fileName) {
-    auto abs_table = TRCFileAdapter{}.extendRead(fileName).at(_markers);
-    return static_cast<TimeSeriesTableVec3&>(*abs_table);
-}
-
 void 
 TRCFileAdapter::write(const TimeSeriesTableVec3& table, 
                       const std::string& fileName) {
@@ -39,6 +37,7 @@ TRCFileAdapter::write(const TimeSeriesTableVec3& table,
 
 TRCFileAdapter::OutputTables
 TRCFileAdapter::extendRead(const std::string& fileName) const {
+
     OPENSIM_THROW_IF(fileName.empty(),
                      EmptyFileName);
 
@@ -46,8 +45,6 @@ TRCFileAdapter::extendRead(const std::string& fileName) const {
     OPENSIM_THROW_IF(!in_stream.good(),
                      FileDoesNotExist,
                      fileName);
-
-    auto table = std::make_shared<TimeSeriesTableVec3>();
 
     // Callable to get the next line in form of vector of tokens.
     auto nextLine = [&] {
@@ -57,16 +54,21 @@ TRCFileAdapter::extendRead(const std::string& fileName) const {
     // First line of the stream is considered the header.
     std::string header{};
     std::getline(in_stream, header);
-    auto header_tokens = tokenize(header, _delimitersRead);
+    auto header_tokens = tokenize(header, _headerDelimiters);
     OPENSIM_THROW_IF(header_tokens.empty(),
                      FileIsEmpty,
                      fileName);        
     OPENSIM_THROW_IF(header_tokens.at(0) != "PathFileType",
                      MissingHeader);
-    table->updTableMetaData().setValueForKey("header", header);
+    AbstractDataTable::TableMetaData metaData{};
+    metaData.setValueForKey("header", header);
 
     // Read the line containing metadata keys.
     auto keys = nextLine();
+    // Keys cannot be empty strings, so delete empty keys due to
+    // excessive use of delimiters
+    IO::eraseEmptyElements(keys);
+
     OPENSIM_THROW_IF(keys.size() != _metadataKeys.size(),
                      IncorrectNumMetaDataKeys,
                      fileName,
@@ -82,6 +84,7 @@ TRCFileAdapter::extendRead(const std::string& fileName) const {
 
     // Read the line containing metadata values.
     auto values = nextLine();
+    IO::eraseEmptyElements(values);
     OPENSIM_THROW_IF(keys.size() != values.size(),
                      MetaDataLengthMismatch,
                      fileName,
@@ -90,17 +93,23 @@ TRCFileAdapter::extendRead(const std::string& fileName) const {
 
     // Fill up the metadata container.
     for(std::size_t i = 0; i < keys.size(); ++i)
-        table->updTableMetaData().setValueForKey(keys[i], values[i]);
+        metaData.setValueForKey(keys[i], values[i]);
 
-    auto num_markers_expected = 
-        std::stoul(table->
-                   getTableMetaData().
+    auto num_markers_expected =
+        std::stoul(metaData.
                    getValueForKey(_numMarkersLabel).
                    template getValue<std::string>());
 
     // Read the line containing column labels and fill up the column labels
     // container.
     auto column_labels = nextLine();
+    // For marker labels we do not need three columns per marker, and
+    // remove the blank elements in TRC due to uniform tabbing. For example,
+    // TRC files often have the following structure:
+    //Frame#<tab>Time<tab>marker1<tab><tab><tab>marker2<tab><tab><tab>
+    //<tab><tab>X1<tab>Y1<tab>Z1<tab>X2<tab>Y2<tab>Z2<tab>X3<tab>Y3<tab>Z3
+    IO::eraseEmptyElements(column_labels);
+
     OPENSIM_THROW_IF(column_labels.size() != num_markers_expected + 2,
                      IncorrectNumColumnLabels,
                      fileName,
@@ -131,6 +140,9 @@ TRCFileAdapter::extendRead(const std::string& fileName) const {
     // X1, Y1, Z1, X2, Y2, Z2, ... so on.
     // Check and ignore these labels.
     auto xyz_labels_found = nextLine();
+    // erase blank labels, e.g. due to Frame# and Time columns
+    IO::eraseEmptyElements(xyz_labels_found);
+
     for(unsigned i = 1; i <= num_markers_expected; ++i) {
         unsigned j = 0;
         for(auto& letter : {_xLabel, _yLabel, _zLabel}) {
@@ -146,11 +158,25 @@ TRCFileAdapter::extendRead(const std::string& fileName) const {
 
     // Read the rows one at a time and fill up the time column container and
     // the data container.
-    std::size_t line_num{_dataStartsAtLine - 1};
-    auto row = nextLine();
-    while(!row.empty()) {
+    std::size_t line_num{_dataStartsAtLine};
+    std::vector<std::string> row = nextLine();
+    // skip immediate blank lines between header and data.
+    while(row.empty() || row.at(0).empty()) {
+        row = nextLine();
         ++line_num;
-        size_t expected{column_labels.size() * 3 + 2};
+    }
+    
+    const size_t expected{ column_labels.size() * 3 + 2 };
+    // Will first store data in a SimTK::Matrix to avoid expensive calls 
+    // to the table's appendRow() which reallocates and copies the whole table.
+    int rowNumber = 0;
+    int last_size = 1024; 
+    SimTK::Matrix_<SimTK::Vec3> markerData{last_size, static_cast<int>(num_markers_expected)};
+    std::vector<double> times;
+    times.resize(last_size);
+
+    // An empty line during data parsing denotes end of data
+    while (!row.empty()) {
         OPENSIM_THROW_IF(row.size() != expected,
                          RowLengthMismatch,
                          fileName,
@@ -160,26 +186,45 @@ TRCFileAdapter::extendRead(const std::string& fileName) const {
 
         // Columns 2 till the end are data.
         TimeSeriesTableVec3::RowVector 
-            row_vector{static_cast<int>(num_markers_expected)};
+            row_vector{static_cast<int>(num_markers_expected), 
+                       SimTK::Vec3(SimTK::NaN)};
         int ind{0};
-        for(std::size_t c = 2; c < column_labels.size() * 3 + 2; c += 3)
-            row_vector[ind++] = SimTK::Vec3{std::stod(row.at(c)),
-                                            std::stod(row.at(c+1)),
-                                            std::stod(row.at(c+2))};
-
+        for (std::size_t c = 2; c < column_labels.size() * 3 + 2; c += 3) {
+            //only if each component is specified read process as a Vec3
+            if ( !(row.at(c).empty() || row.at(c + 1).empty() 
+                                     || row.at(c + 2).empty()) ) {
+                row_vector[ind] = SimTK::Vec3{ std::stod(row.at(c)),
+                                               std::stod(row.at(c + 1)),
+                                               std::stod(row.at(c + 2)) };
+            } // otherwise the value will remain NaN (default)
+            ++ind;
+        }
+        markerData[rowNumber] = row_vector;
         // Column 1 is time.
-        table->appendRow(std::stod(row.at(1)), std::move(row_vector));
-
+        times[rowNumber] = std::stod(row.at(1));
+        rowNumber++;
+        if (rowNumber== last_size) {
+            // resize all Data/Matrices, double the size  while keeping data
+            int newSize = last_size * 2;
+            times.resize(newSize);
+            // Repeat for Data matrices in use
+            markerData.resizeKeep(newSize, (int)num_markers_expected);
+            last_size = newSize;
+        }
         row = nextLine();
+        ++line_num;
     }
+    // Trim Matrices in use to actual data and move into tables
+    times.resize(rowNumber);
+    markerData.resizeKeep(rowNumber, (int)num_markers_expected);
 
     // Set the column labels of the table.
-    ValueArray<std::string> value_array{};
+    std::vector<std::string> labels{};
     for(const auto& cl : column_labels)
-        value_array.upd().push_back(SimTK::Value<std::string>{cl});
-    TimeSeriesTableVec3::DependentsMetaData dep_metadata{};
-    dep_metadata.setValueArrayForKey("labels", value_array);
-    table->setDependentsMetaData(dep_metadata);
+            labels.push_back(SimTK::Value<std::string>{cl});
+    auto table = std::make_shared<TimeSeriesTableVec3>(
+            times, markerData, labels);
+    table->updTableMetaData() = metaData;
 
     OutputTables output_tables{};
     output_tables.emplace(_markers, table);
@@ -197,10 +242,10 @@ TRCFileAdapter::extendWrite(const InputTables& absTables,
     try {
         auto abs_table = absTables.at(_markers);
         table = dynamic_cast<const TimeSeriesTableVec3*>(abs_table);
-    } catch(std::out_of_range) {
+    } catch(const std::out_of_range&) {
         OPENSIM_THROW(KeyMissing,
                       _markers);
-    } catch(std::bad_cast&) {
+    } catch(const std::bad_cast&) {
         OPENSIM_THROW(IncorrectTableType);
     }
 
@@ -246,24 +291,13 @@ TRCFileAdapter::extendWrite(const InputTables& absTables,
     } catch(KeyNotFound&) {
         out_stream << datarate << _delimiterWrite;
     }
-    try {
-        out_stream << table->
-                      getTableMetaData().
-                      getValueForKey(_metadataKeys[2]).
-                      getValue<std::string>()
-                   << _delimiterWrite;
-    } catch(KeyNotFound&) {
-        out_stream << table->getNumRows() << _delimiterWrite;
-    }
-    try {
-        out_stream << table->
-                      getTableMetaData().
-                      getValueForKey(_metadataKeys[3]).
-                      getValue<std::string>()
-                   << _delimiterWrite;
-    } catch(KeyNotFound&) {
-        out_stream << table->getNumColumns() << _delimiterWrite;
-    }
+
+    // Next is _metadataKeys[2] is NumFrames
+    out_stream << table->getNumRows() << _delimiterWrite;
+
+    // Next is _metadataKeys[3] is NumMarkers
+    out_stream << table->getNumColumns() << _delimiterWrite;
+
     try {
         out_stream << table->
                       getTableMetaData().

@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Ayman Habib                                                     *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -53,6 +53,17 @@ int main(int argc,char **argv)
     //TODO: put these options on the command line
     //LoadOpenSimLibrary("osimSimbodyEngine");
 
+    // DEPRECATION NOTICE
+    const std::string deprecationNotice = R"(
+    THIS EXECUTABLE IS DEPRECATED AND WILL BE REMOVED IN A FUTURE RELEASE.
+
+    Use opensim-cmd instead, which can do everything that this executable can.
+
+      scale -S SetupFileName -> opensim-cmd run-tool SetupFileName
+      scale -PS              -> opensim-cmd print-xml scale
+    )";
+    log_warn(deprecationNotice);
+
     // SET OUTPUT FORMATTING
     IO::SetDigitsPad(4);
 
@@ -96,7 +107,8 @@ int main(int argc,char **argv)
                     Object::setSerializeAllDefaults(true);
                     subject->print("default_Setup_Scale.xml");
                     Object::setSerializeAllDefaults(false);
-                    cout << "Created file default_Setup_Scale.xml with default setup" << endl;
+                    log_info("Created file default_Setup_Scale.xml with "
+                             "default setup");
                     return(0);
 
                 // PRINT PROPERTY INFO
@@ -116,7 +128,8 @@ int main(int argc,char **argv)
 
                 // Unrecognized
                 } else {
-                    cout << "Unrecognized option " << option << " on command line... Ignored" << endl;
+                    log_error("Unrecognized option {} on command line... "
+                              "Ignored", option);
                     PrintUsage(argv[0], cout);
                     return(0);
                 }

@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2014 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Nabeel Allana                                                   *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -26,6 +26,8 @@
 //=============================================================================
 #include "ExpressionBasedCoordinateForce.h"
 #include <OpenSim/Simulation/Model/Model.h>
+#include <lepton/Parser.h>
+#include <lepton/ParsedExpression.h>
 
 using namespace OpenSim;
 using namespace std;
@@ -115,7 +117,7 @@ void ExpressionBasedCoordinateForce::
     extendAddToSystem(SimTK::MultibodySystem& system) const
 {
     Super::extendAddToSystem(system);    // Base class first.
-    addCacheVariable<double>("force_magnitude", 0.0, SimTK::Stage::Velocity);
+    this->_forceMagnitudeCV = addCacheVariable("force_magnitude", 0.0, SimTK::Stage::Velocity);
 }
 
 //=============================================================================
@@ -139,7 +141,7 @@ double ExpressionBasedCoordinateForce::calcExpressionForce(const SimTK::State& s
     forceVars["q"] = q;
     forceVars["qdot"] = qdot;
     double forceMag = _forceProg.evaluate(forceVars);
-    setCacheVariableValue<double>(s, "force_magnitude", forceMag);
+    setCacheVariableValue(s, _forceMagnitudeCV, forceMag);
     return forceMag;
 }
 
@@ -147,7 +149,7 @@ double ExpressionBasedCoordinateForce::calcExpressionForce(const SimTK::State& s
 const double& ExpressionBasedCoordinateForce::
     getForceMagnitude(const SimTK::State& s)
 {
-    return getCacheVariableValue<double>(s, "force_magnitude");
+    return getCacheVariableValue(s, _forceMagnitudeCV);
 }
 
 

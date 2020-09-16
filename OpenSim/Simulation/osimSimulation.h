@@ -9,8 +9,8 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
- * Author(s): OpenSim Team                                                     *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
+ * Author(s): OpenSim Team                                                    *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
  * not use this file except in compliance with the License. You may obtain a  *
@@ -40,7 +40,9 @@
 #include "Model/CoordinateSet.h"
 #include "Model/ElasticFoundationForce.h"
 #include "Model/HuntCrossleyForce.h"
+#include "Model/SmoothSphereHalfSpaceForce.h"
 #include "Model/Ligament.h"
+#include "Model/Blankevoort1991Ligament.h"
 #include "Model/JointSet.h"
 #include "Model/Marker.h"
 #include "Model/Station.h"
@@ -110,11 +112,21 @@
 #include "SimbodyEngine/Coordinate.h"
 #include "SimbodyEngine/SpatialTransform.h"
 
+#include "AssemblySolver.h"
+#include "CoordinateReference.h"
+#include "InverseDynamicsSolver.h"
+#include "InverseKinematicsSolver.h"
+#include "MarkersReference.h"
+#include "OrientationsReference.h"
 #include "MomentArmSolver.h"
+#include "Reference.h"
+#include "Solver.h"
 #include "StatesTrajectory.h"
 #include "StatesTrajectoryReporter.h"
+#include "OpenSense/OpenSenseUtilities.h"
+
+#include "SimulationUtilities.h"
 
 #include "RegisterTypes_osimSimulation.h"   // to expose RegisterTypes_osimSimulation
-
 
 #endif // _osimSimulation_h_

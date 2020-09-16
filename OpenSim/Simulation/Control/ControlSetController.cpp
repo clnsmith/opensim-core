@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Jack Middleton                                                  *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -33,7 +33,8 @@
 #include "ControlSetController.h"
 #include "ControlLinear.h"
 #include "ControlSet.h"
-#include <OpenSim/Simulation/Model/Model.h>
+#include <OpenSim/Simulation/Model/Actuator.h>
+#include <OpenSim/Common/Storage.h>
 
 
 //=============================================================================
@@ -185,7 +186,6 @@ double ControlSetController::getFirstTime() const {
     Array<int> controlList;
    SimTK_ASSERT( _controlSet , "ControlSetController::getFirstTime controlSet is NULL");
 
-//    std::cout << " ncontrols= "<< _controlSet->getSize() << std::endl<<std::endl;
     _controlSet->getControlList( "ControlLinear" , controlList );
     
     if( controlList.getSize() < 1 ) {
@@ -217,11 +217,12 @@ void ControlSetController::extendFinalizeFromProperties()
 
     // The result of default constructing and adding  this to a model
     if (_controlSet == nullptr &&  !hasFile) {
-        std::cout << "ControlSetController::extendFinalizeFromProperties '";
-        std::cout << _controlsFileNameProp.getName() << "' unassigned.\n";
-        std::cout << "No ControlSet loaded or set. Use ControSetController::";
-        std::cout << "setControlSetFileName() to\n specify file and try again." << std::endl;
-        setDisabled(true);
+        log_warn("ControlSetController::extendFinalizeFromProperties '{}' unassigned.", 
+            _controlsFileNameProp.getName());
+        log_warn("No ControlSet loaded or set. Use "
+                 "ControSetController::setControlSetFileName()"
+                 "to specify file and try again.");
+        setEnabled(false);
         return;
     }
 
@@ -243,22 +244,21 @@ void ControlSetController::extendFinalizeFromProperties()
             //TODO: Should throw a specific "UnaccessibleControlFileException"
             //testSerializeOpenSimObjects should not expect to just add garbage filled
             //objects (components) to a model and expect to serialize- must be changed!
-            std::cout << msg << std::endl;
+            log_error(msg);
         }
     }
 
     if (loadedControlSet && _controlSet) {
-        std::cout << "ControlSetController::extendFinalizeFromProperties '";
-        std::cout << _controlsFileNameProp.getName() << "' loaded\n";
-        std::cout << "and replacing existing ControlSet '";
-        std::cout << _controlSet->getName() << "'." << std::endl;
+        log_warn("ControlSetController::extendFinalizeFromProperties '{}' "
+                 "loaded and will replace existing ControlSet '{}'.",
+                _controlsFileName, _controlSet->getName());
         delete _controlSet;
     }
 
     if (loadedControlSet) {
         // Now set the current control set from what was loaded
         _controlSet = loadedControlSet;
-        setDisabled(false);
+        setEnabled(true);
     }
 
     std::string ext = ".excitation";

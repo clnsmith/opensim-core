@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2015 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
  * not use this file except in compliance with the License. You may obtain a  *
@@ -25,7 +25,6 @@
 
 // Non-standard headers.
 #include "osimCommonDLL.h"
-#include "SimTKcommon.h"
 #include "Exception.h"
 #include "AbstractDataTable.h"
 
@@ -63,6 +62,15 @@ public:
     }
 }; 
 
+class TableNotFoundException : public Exception {
+public:
+    TableNotFoundException(const std::string& name) :
+        Exception() {
+        std::string msg = "No table with the name '" + name + "' was found. Check for spelling errors.";
+
+        addMessage(msg);
+    }
+};
 /** DataAdapter is an abstract class defining an interface for reading/writing
 in/out the contents of a DataTable. It enables access to/from various data
 sources/sinks such as: streams, files, databases and devices. The DataTable
@@ -110,6 +118,19 @@ public:
     bool registerDataAdapter(const std::string& identifier,
                              const DataAdapter& adapter);
 
+    /** Public interface to read data from a dataSourceSpecification, typically a file or folder */
+    DataAdapter::OutputTables read(const std::string& dataSourceSpecification) const {
+        return extendRead(dataSourceSpecification);
+    }
+
+    /** Generic interface to retrieve a specific table by name from read result */
+    const std::shared_ptr<AbstractDataTable> getDataTable(const OutputTables& tables, const std::string tableName) {
+        if (tables.find(tableName) == tables.end()) {
+            // Throw exception table not found, likely typo in tableName
+            throw TableNotFoundException(tableName);
+        }
+        return tables.at(tableName);
+    }
 protected:
     /** Creator of concrete DataAdapter(s) for the specified source type by its
     unique identifier (string). For example, for file based sources, a 
@@ -118,7 +139,7 @@ protected:
     static
     std::shared_ptr<DataAdapter> createAdapter(const std::string& identifier);
 
-    /** Immplements reading functionality.                                    */
+    /** Implements reading functionality.                                    */
     virtual OutputTables extendRead(const std::string& sourceName) const = 0;
 
     /** Implements writing functionality.                                     */
@@ -130,6 +151,6 @@ private:
     static RegisteredDataAdapters _registeredDataAdapters;
 };
 
-} // namepsace OpenSim
+} // namespace OpenSim
 
 #endif // OPENSIM_DATA_ADAPTER_H_

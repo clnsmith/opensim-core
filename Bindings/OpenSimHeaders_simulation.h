@@ -29,6 +29,7 @@
 
 #include <OpenSim/Simulation/Model/ElasticFoundationForce.h>
 #include <OpenSim/Simulation/Model/HuntCrossleyForce.h>
+#include <OpenSim/Simulation/Model/SmoothSphereHalfSpaceForce.h>
 
 #include <OpenSim/Simulation/Model/ContactGeometrySet.h>
 #include <OpenSim/Simulation/Model/Probe.h>
@@ -108,6 +109,7 @@
 #include <OpenSim/Simulation/Model/PointForceDirection.h>
 #include <OpenSim/Simulation/Model/GeometryPath.h>
 #include <OpenSim/Simulation/Model/Ligament.h>
+#include <OpenSim/Simulation/Model/Blankevoort1991Ligament.h>
 
 #include <OpenSim/Simulation/SimbodyEngine/Constraint.h>
 #include <OpenSim/Simulation/Model/ConstraintSet.h>
@@ -131,12 +133,31 @@
 
 #include <OpenSim/Simulation/Solver.h>
 #include <OpenSim/Simulation/AssemblySolver.h>
+#include <OpenSim/Simulation/Reference.h>
 #include <OpenSim/Simulation/MarkersReference.h>
 #include <OpenSim/Simulation/CoordinateReference.h>
+#include <OpenSim/Simulation/OrientationsReference.h>
 #include <OpenSim/Simulation/InverseKinematicsSolver.h>
+#include <OpenSim/Simulation/OpenSense/IMUPlacer.h>
+#include <OpenSim/Simulation/OpenSense/OpenSenseUtilities.h>
 
 #include <OpenSim/Simulation/StatesTrajectory.h>
 #include <OpenSim/Simulation/StatesTrajectoryReporter.h>
 
-#endif // OPENSIM_OPENSIM_HEADERS_SIMULATION_H_
+#include <OpenSim/Simulation/SimulationUtilities.h>
+#include <OpenSim/Simulation/VisualizerUtilities.h>
 
+#include <OpenSim/Actuators/osimActuatorsDLL.h>
+#include <OpenSim/Actuators/MuscleFixedWidthPennationModel.h>
+#include <OpenSim/Actuators/MuscleFirstOrderActivationDynamicModel.h>
+#include <OpenSim/Actuators/Thelen2003Muscle.h>
+#include <OpenSim/Actuators/Millard2012EquilibriumMuscle.h>
+#include <OpenSim/Actuators/FiberCompressiveForceCosPennationCurve.h>
+#include <OpenSim/Actuators/FiberCompressiveForceLengthCurve.h>
+#include <OpenSim/Actuators/ActiveForceLengthCurve.h>
+#include <OpenSim/Actuators/FiberForceLengthCurve.h>
+#include <OpenSim/Actuators/ForceVelocityCurve.h>
+#include <OpenSim/Actuators/ForceVelocityInverseCurve.h>
+#include <OpenSim/Actuators/TendonForceLengthCurve.h>
+
+#endif // OPENSIM_OPENSIM_HEADERS_SIMULATION_H_

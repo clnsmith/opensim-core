@@ -9,7 +9,7 @@
  * Biological Structures at Stanford, funded under the NIH Roadmap for        *
  * Medical Research, grant U54 GM072970. See https://simtk.org/home/simbody.  *
  *                                                                            *
- * Portions copyright (c) 2005-12 Stanford University and the Authors.        *
+ * Portions Copyright (c) 2005-2017 Stanford University and the Authors.      *
  * Authors: Michael Sherman                                                   *
  * Contributors:                                                              *
  *                                                                            *
@@ -593,12 +593,11 @@ public:
     /// scalarAssignInPlace() method which also assign the scalar to every element.
     template <class S> inline MatrixBase&
     elementwiseAssign(const S& s);
-#endif
+
     /// Overloaded to allow an integer argument, which is converted to Real.
     MatrixBase& elementwiseAssign(int s)
     {   return elementwiseAssign<Real>(Real(s)); }
 
-#ifndef SWIG
     /// Set M(i,j) = M(i,j)^-1.
     MatrixBase& elementwiseInvertInPlace();
 

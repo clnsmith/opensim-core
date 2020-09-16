@@ -9,7 +9,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Tim Dorn                                                        *
  * Contributor(s): Thomas Uchida                                              *
  *                                                                            *
@@ -25,11 +25,12 @@
  * -------------------------------------------------------------------------- */
 
 #include "Probe.h"
-#include "Model.h"
+#include <OpenSim/Common/Set.h>
 
+namespace OpenSim {
 
-
-namespace OpenSim { 
+class Model;
+class Muscle;
 
 // Helper classes defined below.
 class Umberger2010MuscleMetabolicsProbe_MetabolicMuscleParameter;
@@ -363,7 +364,7 @@ public:
     obtained if the metabolic probe is already 'connected' to the model.
     */
     /** Get the number of muscles being analyzed in the metabolic analysis. */
-    const int getNumMetabolicMuscles() const;  
+    int getNumMetabolicMuscles() const;
 
     /** Add a muscle and its parameters so that it can be included in the metabolic analysis. */
     void addMuscle(const std::string& muscleName, 
@@ -393,22 +394,22 @@ public:
         (i.e. isUsingProvidedMass = true), or if it is being automatically
         calculated from muscle data already present in the model
         (i.e. isUsingProvidedMass = true). */
-    const double getMuscleMass(const std::string& muscleName) const;
+    double getMuscleMass(const std::string& muscleName) const;
 
     /** Get the ratio of slow twitch fibers for an existing muscle. */
-    const double getRatioSlowTwitchFibers(const std::string& muscleName) const;
+    double getRatioSlowTwitchFibers(const std::string& muscleName) const;
 
     /** %Set the ratio of slow twitch fibers for an existing muscle. */
     void setRatioSlowTwitchFibers(const std::string& muscleName, const double& ratio);
 
     /** Get the density for an existing muscle (kg/m^3). */
-    const double getDensity(const std::string& muscleName) const;
+    double getDensity(const std::string& muscleName) const;
 
     /** %Set the density for an existing muscle (kg/m^3). */
     void setDensity(const std::string& muscleName, const double& density);
 
     /** Get the specific tension for an existing muscle (Pascals (N/m^2)). */
-    const double getSpecificTension(const std::string& muscleName) const;
+    double getSpecificTension(const std::string& muscleName) const;
 
     /** %Set the specific tension for an existing muscle (Pascals (N/m^2)). */
     void setSpecificTension(const std::string& muscleName, const double& specificTension);
@@ -457,6 +458,14 @@ public:
 //==============================================================================
 //          Umberger2010MuscleMetabolicsProbe_MetabolicMuscleParameter
 //==============================================================================
+
+/**
+ * Documentation for this class has been provided with the documentation for the
+ * Umberger2010MuscleMetabolicsProbe class.
+ *
+ * @see Umberger2010MuscleMetabolicsProbe
+ */
+
 class OSIMSIMULATION_API 
     Umberger2010MuscleMetabolicsProbe_MetabolicMuscleParameter 
     : public Object  

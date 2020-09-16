@@ -1,4 +1,4 @@
-%module(directors="1") common
+%module(package="opensim", directors="1") common
 #pragma SWIG nowarn=822,451,503,516,325
 // 401 is "Nothing known about base class *some-class*.
 //         Maybe you forgot to instantiate *some-template* using %template."
@@ -11,6 +11,7 @@
 %{
 #define SWIG_FILE_WITH_INIT
 #include <Bindings/OpenSimHeaders_common.h>
+#include <Bindings/PropertyHelper.h>
 %}
 
 %{
@@ -196,6 +197,7 @@ note: ## is a "glue" operator: `a ## b` --> `ab`.
             else:
                 # This is how Python knows to stop iterating.
                  raise StopIteration()
+        __next__ = next # For Python 3.
 
     def __iter__(self):
         """Get an iterator for this Set, starting at index 0."""
@@ -281,6 +283,11 @@ note: ## is a "glue" operator: `a ## b` --> `ab`.
     }
 }
 
+%extend OpenSim::DataTable_ {
+    std::string __str__() const {
+        return $self->toString();
+    }
+}
 
 // Include all the OpenSim code.
 // =============================

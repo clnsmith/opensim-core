@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Ajay Seth                                                       *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -25,20 +25,15 @@
 // INCLUDES
 //=============================================================================
 #include "InverseDynamicsTool.h"
-#include <string>
-#include <iostream>
-#include <OpenSim/Simulation/Model/Model.h>
-#include <OpenSim/Simulation/SimbodyEngine/Body.h>
-#include <OpenSim/Simulation/Model/CoordinateSet.h>
-#include <OpenSim/Simulation/Model/JointSet.h>
-#include <OpenSim/Simulation/InverseDynamicsSolver.h>
-#include <OpenSim/Common/XMLDocument.h>
-#include <OpenSim/Common/IO.h>
-#include <OpenSim/Common/Storage.h>
-#include <OpenSim/Common/FunctionSet.h> 
-#include <OpenSim/Common/GCVSplineSet.h>
+
 #include <OpenSim/Common/Constant.h>
-#include "AnalyzeTool.h"
+#include <OpenSim/Common/FunctionSet.h>
+#include <OpenSim/Common/GCVSplineSet.h>
+#include <OpenSim/Common/IO.h>
+#include <OpenSim/Common/Stopwatch.h>
+#include <OpenSim/Common/XMLDocument.h>
+#include <OpenSim/Simulation/InverseDynamicsSolver.h>
+#include <OpenSim/Simulation/Model/Model.h>
 
 using namespace OpenSim;
 using namespace std;
@@ -224,7 +219,8 @@ void InverseDynamicsTool::getJointsByName(Model &model, const Array<std::string>
         if (k >= 0){
             joints.adoptAndAppend(&modelJoints[k]);
         } else {
-            cout << "\nWARNING: InverseDynamicsTool could not find Joint named '" << jointNames[i] << "' to report body forces." << endl;
+            log_warn("InverseDynamicsTool could not find Joint named '{}' to "
+                    "report body forces.", jointNames[i]);
         }
     }
     joints.setMemoryOwner(false);
@@ -244,34 +240,41 @@ bool InverseDynamicsTool::run()
     bool modelFromFile=true;
     try{
         //Load and create the indicated model
-        if (!_model) 
+        if (!_model) {
+            OPENSIM_THROW_IF_FRMOBJ(_modelFileName.empty(), Exception,
+                "No model filename was provided.")
+
             _model = new Model(_modelFileName);
+        }
         else
             modelFromFile = false;
-        _model->printBasicInfo(cout);
 
-        cout<<"Running tool " << getName() <<".\n"<<endl;
+        _model->finalizeFromProperties();
+        _model->printBasicInfo();
 
-        _model->setup();
-
+        log_info("Running tool {}...", getName());
         // Do the maneuver to change then restore working directory 
         // so that the parsing code behaves properly if called from a different directory.
         string saveWorkingDirectory = IO::getCwd();
         string directoryOfSetupFile = IO::getParentDirectory(getDocumentFileName());
         IO::chDir(directoryOfSetupFile);
 
-        const CoordinateSet &coords = _model->getCoordinateSet();
+        /*bool externalLoads = */createExternalLoads(_externalLoadsFileName, *_model);
+        // Initialize the model's underlying computational system and get its default state.
+        SimTK::State& s = _model->initSystem();
+
+
+        auto coords = _model->getCoordinatesInMultibodyTreeOrder();
         int nq = _model->getNumCoordinates();
 
         FunctionSet *coordFunctions = NULL;
-        //Storage *coordinateValues = NULL;
 
         if (loadCoordinateValues()){
             if(_lowpassCutoffFrequency>=0) {
-                cout<<"\n\nLow-pass filtering coordinates data with a cutoff frequency of "<<_lowpassCutoffFrequency<<"..."<<endl<<endl;
+                log_info("Low-pass filtering coordinates data with a cutoff "
+                         "frequency of {}...", _lowpassCutoffFrequency);
                 _coordinateValues->pad(_coordinateValues->getSize()/2);
                 _coordinateValues->lowpassIIR(_lowpassCutoffFrequency);
-                if (getVerboseLevel()==Debug) _coordinateValues->print("coordinateDataFiltered.sto");
             }
             // Convert degrees to radian if indicated
             if(_coordinateValues->isInDegrees()){
@@ -282,14 +285,15 @@ bool InverseDynamicsTool::run()
 
             //Functions must correspond to model coordinates and their order for the solver
             for(int i=0; i<nq; i++){
-                if(coordFunctions->contains(coords[i].getName())){
-                    coordFunctions->insert(i,coordFunctions->get(coords[i].getName()));
+                const Coordinate& coord = *coords[i];
+                if(coordFunctions->contains(coord.getName())){
+                    coordFunctions->insert(i,coordFunctions->get(coord.getName()));
                 }
                 else{
-                    coordFunctions->insert(i,new Constant(coords[i].getDefaultValue()));
-                    std::cout << "InverseDynamicsTool: coordinate file does not contain coordinate "
-                        << coords[i].getName() << " assuming default value" 
-                        << std::endl;
+                    coordFunctions->insert(i,new Constant(coord.getDefaultValue()));
+                    log_info("InverseDynamicsTool: coordinate file does not "
+                             "contain coordinate '{}'. Assuming default value.",
+                            coord.getName());   
                 }
             }
             if(coordFunctions->getSize() > nq){
@@ -298,13 +302,9 @@ bool InverseDynamicsTool::run()
         }
         else{
             IO::chDir(saveWorkingDirectory);
-            throw Exception("InverseDynamicsTool: no coordinate file found, or setCoordinateValues() was not called.");
-
+            throw Exception("InverseDynamicsTool: no coordinate file found, "
+                " or setCoordinateValues() was not called.");
         }
-
-        /*bool externalLoads = */createExternalLoads(_externalLoadsFileName, *_model, _coordinateValues);
-        // Initialize the model's underlying computational system and get its default state.
-        SimTK::State& s = _model->initSystem();
 
         // Exclude user-specified forces from the dynamics for this analysis
         disableModelForces(*_model, s, _excludedForces);
@@ -321,7 +321,7 @@ bool InverseDynamicsTool::run()
         // create the solver given the input data
         InverseDynamicsSolver ivdSolver(*_model);
 
-        const clock_t start = clock();
+        Stopwatch watch;
 
         int nt = final_index-start_index+1;
         
@@ -336,20 +336,23 @@ bool InverseDynamicsTool::run()
         // solve for the trajectory of generalized forces that correspond to the 
         // coordinate trajectories provided
         ivdSolver.solve(s, *coordFunctions, times, genForceTraj);
-
-
         success = true;
 
-        cout << "InverseDynamicsTool: " << nt << " time frames in " <<(double)(clock()-start)/CLOCKS_PER_SEC << "s\n" <<endl;
+        log_info("InverseDynamicsTool: {} time frames in {}.", nt, 
+            watch.getElapsedTimeFormatted());
     
         JointSet jointsForEquivalentBodyForces;
         getJointsByName(*_model, _jointsForReportingBodyForces, jointsForEquivalentBodyForces);
         int nj = jointsForEquivalentBodyForces.getSize();
 
+        // Generalized forces from ID Solver are in MultibodyTree order and not
+        // necessarily in the order of the Coordinates in the Model.
+        // We can get the Coordinates in Tree order from the Model.
         Array<string> labels("time", nq+1);
         for(int i=0; i<nq; i++){
-            labels[i+1] = coords[i].getName();
-            labels[i+1] += (coords[i].getMotionType() == Coordinate::Rotational) ? "_moment" : "_force";
+            labels[i+1] = coords[i]->getName();
+            labels[i+1] += (coords[i]->getMotionType() == Coordinate::Rotational) ? 
+                "_moment" : "_force";
         }
 
         Array<string> body_force_labels("time", 6*nj+1);
@@ -368,13 +371,16 @@ bool InverseDynamicsTool::run()
         SpatialVec equivalentBodyForceAtJoint;
 
         for(int i=0; i<nt; i++){
-            StateVector genForceVec(times[i], nq, &((genForceTraj[i])[0]));
+            StateVector
+                genForceVec(times[i], genForceTraj[i]);
             genForceResults.append(genForceVec);
 
             // if there are joints requested for equivalent body forces then calculate them
             if(nj>0){
                 Vector forces(6*nj, 0.0);
-                StateVector bodyForcesVec(times[i], 6*nj, &forces[0]);
+                StateVector bodyForcesVec(times[i],
+                                          SimTK::Vector_<double>(6*nj,
+                                                                 &forces[0]));
 
                 s.updTime() = times[i];
                 Vector &q = s.updQ();
@@ -416,9 +422,10 @@ bool InverseDynamicsTool::run()
             IO::chDir(saveWorkingDirectory);
         }
 
+        removeExternalLoadsFromModel();
     }
     catch (const OpenSim::Exception& ex) {
-        std::cout << "InverseDynamicsTool Failed: " << ex.what() << std::endl;
+        log_error("InverseDynamicsTool Failed: {}", ex.what());
         throw (Exception("InverseDynamicsTool Failed, please see messages window for details..."));
     }
 
@@ -447,7 +454,8 @@ void InverseDynamicsTool::updateFromXMLNode(SimTK::Xml::Element& aNode, int vers
         if (documentVersion < 20300){
             std::string origFilename = getDocumentFileName();
             newFileName=IO::replaceSubstring(newFileName, ".xml", "_v23.xml");
-            cout << "Old version setup file encountered. Converting to new file "<< newFileName << endl;
+            log_info("Old version setup file encountered. Converting to new "
+                     "file '{}'...", newFileName);
             SimTK::Xml::Document doc = SimTK::Xml::Document(origFilename);
             doc.writeToFile(newFileName);
         }

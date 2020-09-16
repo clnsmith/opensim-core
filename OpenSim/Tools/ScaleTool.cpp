@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Peter Loan                                                      *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -25,10 +25,9 @@
 // INCLUDES
 //=============================================================================
 #include "ScaleTool.h"
-#include <OpenSim/Common/SimmIO.h>
 #include <OpenSim/Common/IO.h>
 #include <OpenSim/Simulation/Model/Model.h>
-#include "SimTKsimbody.h"
+#include "GenericModelMaker.h"
 
 //=============================================================================
 // STATICS
@@ -225,7 +224,7 @@ ScaleTool& ScaleTool::operator=(const ScaleTool &aSubject)
  */
 Model* ScaleTool::createModel() const
 {
-    cout << "Processing subject " << getName() << endl;
+    log_info("Processing subject {}...", getName());
 
     /* Make the generic model. */
     if (!_genericModelMakerProp.getValueIsDefault())
@@ -233,7 +232,8 @@ Model* ScaleTool::createModel() const
         Model *model = getGenericModelMaker().processModel(_pathToSubject);
         if (!model)
         {
-            cout << "===ERROR===: Unable to load generic model." << endl;
+            log_error("Unable to load generic model at path {}.", 
+                _pathToSubject);
             return 0;
         }
         else {
@@ -241,7 +241,9 @@ Model* ScaleTool::createModel() const
             return model;
         }
     } else {
-        cout << "ScaleTool.createModel: WARNING- Unscaled model not specified (" << _genericModelMakerProp.getName() << " section missing from setup file)." << endl;
+        log_warn("ScaleTool::createModel: Unscaled model not specified ({} "  
+            "section missing from setup file).", 
+            _genericModelMakerProp.getName());
     }
     return 0;
 }
@@ -250,7 +252,9 @@ bool ScaleTool::run() const {
     std::unique_ptr<Model> model(createModel());
 
     if(model == nullptr) { 
-        throw Exception("scale: ERROR- No model specified.",__FILE__,__LINE__);
+        string msg = "ScaleTool: No model specified.";
+        log_error(msg);
+        throw Exception(msg, __FILE__, __LINE__);
     }
 
     if (!isDefaultModelScaler() && getModelScaler().getApply())
@@ -262,7 +266,8 @@ bool ScaleTool::run() const {
     }
     else
     {
-        cout << "Scaling parameters disabled (apply is false) or not set. Model is not scaled." << endl;
+        log_error("Scaling parameters disabled (apply is false) or not set. "
+            "Model is not scaled.");
     }
 
     if (!isDefaultMarkerPlacer())
@@ -274,7 +279,8 @@ bool ScaleTool::run() const {
     }
     else
     {
-        cout << "Marker placement parameters disabled (apply is false) or not set. No markers have been moved." << endl;
+        log_error("Marker placement parameters disabled (apply is false) or "
+            "not set. No markers have been moved.");
     }
     return true;
 }

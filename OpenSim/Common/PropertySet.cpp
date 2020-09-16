@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Frank C. Anderson                                               *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -60,6 +60,15 @@ PropertySet::PropertySet(const PropertySet &aSet)
     _array = aSet._array;
     _array.setMemoryOwner(false);
 
+}
+
+PropertySet& PropertySet::operator=(const PropertySet& aSet)
+{
+   if (this != &aSet) {
+       _array = aSet._array;
+       _array.setMemoryOwner(false);
+   }
+   return *this;
 }
 
 
@@ -136,7 +145,7 @@ getSize() const
  * @throws Exception if the index is out of bounds.
  */
 Property_Deprecated* PropertySet::
-get(int aIndex) throw(Exception)
+get(int aIndex)
 {
     // NO SUCH PROPERTY - THROW EXCEPTION
     if((aIndex<0)||(aIndex>=_array.getSize())) {
@@ -172,7 +181,7 @@ get(int aIndex) const
  * @throws Exception if there is no such property.
  */
 Property_Deprecated* PropertySet::
-get(const string &aName) throw(Exception)
+get(const string &aName)
 {
     int i;
     PropertyInt prop(aName,0);

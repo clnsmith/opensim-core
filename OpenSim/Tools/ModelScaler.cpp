@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Peter Loan                                                      *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -24,16 +24,10 @@
 //=============================================================================
 // INCLUDES
 //=============================================================================
-#include <OpenSim/Common/ScaleSet.h>
 #include "ModelScaler.h"
 #include <OpenSim/Simulation/Model/Model.h>
-#include <OpenSim/Simulation/SimbodyEngine/SimbodyEngine.h>
 #include <OpenSim/Common/MarkerData.h>
 #include <OpenSim/Common/IO.h>
-#include <OpenSim/Simulation/Model/BodySet.h>
-#include <OpenSim/Simulation/Model/MarkerSet.h>
-#include <OpenSim/Simulation/Model/Marker.h>
-#include <OpenSim/Simulation/Model/ForceSet.h>
 
 //=============================================================================
 // STATICS
@@ -235,7 +229,7 @@ bool ModelScaler::processModel(Model* aModel, const string& aPathToSubject,
     ScaleSet theScaleSet;
     Vec3 unity(1.0);
 
-    cout << endl << "Step 2: Scaling generic model" << endl;
+    log_info("Step 2: Scaling generic model");
 
     /* Make a scale set with a Scale for each physical frame.
      * Initialize all factors to 1.0.
@@ -266,9 +260,9 @@ bool ModelScaler::processModel(Model* aModel, const string& aPathToSubject,
             {
                 /* Load the static pose marker file, and convert units.
                 */
-                MarkerData *markerData = 0;
+                std::unique_ptr<MarkerData> markerData{};
                 if(!_markerFileName.empty() && _markerFileName!=PropertyStr::getDefaultStr()) {
-                    markerData = new MarkerData(aPathToSubject + _markerFileName);
+                    markerData.reset(new MarkerData(aPathToSubject + _markerFileName));
                     markerData->convertToUnits(aModel->getLengthUnits());
                 }
 
@@ -284,7 +278,9 @@ bool ModelScaler::processModel(Model* aModel, const string& aPathToSubject,
                         if (!SimTK::isNaN(scaleFactor))
                             _measurementSet.get(j).applyScaleFactor(scaleFactor, theScaleSet);
                         else
-                            cout << "___WARNING___: " << _measurementSet.get(j).getName() << " measurement not used to scale " << aModel->getName() << endl;
+                            log_warn("'{}' measurement not used to scale {}", 
+                                _measurementSet.get(j).getName(),
+                                aModel->getName());
                     }
                 }
             }
@@ -315,30 +311,33 @@ bool ModelScaler::processModel(Model* aModel, const string& aPathToSubject,
         }
 
         /* Now scale the model. */
-        aModel->scale(s, theScaleSet, aSubjectMass, _preserveMassDist);
-
+        aModel->scale(s, theScaleSet, _preserveMassDist, aSubjectMass);
 
         if(_printResultFiles) {
             std::string savedCwd = IO::getCwd();
             IO::chDir(aPathToSubject);
+            try { // writing can throw an exception
+                if (_outputModelFileNameProp.isValidFileName()) {
+                    if (aModel->print(_outputModelFileName))
+                        log_info("Wrote model file '{}' from model.",
+                            _outputModelFileName, aModel->getName());
+                }
 
-            if (!_outputModelFileNameProp.getValueIsDefault())
-            {
-                if (aModel->print(_outputModelFileName))
-                    cout << "Wrote model file " << _outputModelFileName << " from model " << aModel->getName() << endl;
-            }
-
-            if (!_outputScaleFileNameProp.getValueIsDefault())
-            {
-                if (theScaleSet.print(_outputScaleFileName))
-                    cout << "Wrote scale file " << _outputScaleFileName << " for model " << aModel->getName() << endl;
+                if (_outputScaleFileNameProp.isValidFileName()) {
+                    if (theScaleSet.print(_outputScaleFileName))
+                        log_info("Wrote scale file '{}' for model {}.", 
+                            _outputScaleFileName, aModel->getName());
+                }
+            } // catch the exception so we can reset the working directory
+            catch (std::exception& ex) {
+                IO::chDir(savedCwd);
+                OPENSIM_THROW_FRMOBJ(Exception, ex.what());
             }
             IO::chDir(savedCwd);
         }
     }
-    catch (const Exception& x)
-    {
-        x.print(cout);
+    catch (const Exception& x) {
+        log_error(x.what());
         return false;
     }
 
@@ -354,7 +353,7 @@ bool ModelScaler::processModel(Model* aModel, const string& aPathToSubject,
 double ModelScaler::computeMeasurementScaleFactor(const SimTK::State& s, const Model& aModel, const MarkerData& aMarkerData, const Measurement& aMeasurement) const
 {
     double scaleFactor = 0;
-    cout << "Measurement '" << aMeasurement.getName() << "'" << endl;
+    log_info("Measurement '{}'", aMeasurement.getName());
     if(aMeasurement.getNumMarkerPairs()==0) return SimTK::NaN;
     for(int i=0; i<aMeasurement.getNumMarkerPairs(); i++) {
         const MarkerPair& pair = aMeasurement.getMarkerPair(i);
@@ -363,11 +362,12 @@ double ModelScaler::computeMeasurementScaleFactor(const SimTK::State& s, const M
         double modelLength = takeModelMeasurement(s, aModel, name1, name2, aMeasurement.getName());
         double experimentalLength = takeExperimentalMarkerMeasurement(aMarkerData, name1, name2, aMeasurement.getName());
         if(SimTK::isNaN(modelLength) || SimTK::isNaN(experimentalLength)) return SimTK::NaN;
-        cout << "\tpair " << i << " (" << name1 << ", " << name2 << "): model = " << modelLength << ", experimental = " << experimentalLength << endl;
+        log_info("\tpair {} ({}, {}): model = {}, experimental = {}",
+            i, name1, name2, modelLength, experimentalLength);
         scaleFactor += experimentalLength / modelLength;
     }
     scaleFactor /= aMeasurement.getNumMarkerPairs();
-    cout << "\toverall scale factor = " << scaleFactor << endl;
+    log_info("\toverall scale factor = {}", scaleFactor);
     return scaleFactor;
 }
 
@@ -379,13 +379,12 @@ double ModelScaler::computeMeasurementScaleFactor(const SimTK::State& s, const M
  */
 double ModelScaler::takeModelMeasurement(const SimTK::State& s, const Model& aModel, const string& aName1, const string& aName2, const string& aMeasurementName) const
 {
-    if (!aModel.getMarkerSet().contains(aName1)) {
-        cout << "___WARNING___: marker " << aName1 << " in " << aMeasurementName << " measurement not found in " << aModel.getName() << endl;
-        return SimTK::NaN;
-    }
-    if (!aModel.getMarkerSet().contains(aName2)) {
-        cout << "___WARNING___: marker " << aName2 << " in " << aMeasurementName << " measurement not found in " << aModel.getName() << endl;
-        return SimTK::NaN;
+    for (const auto& aName : {aName1, aName2}) {
+        if (!aModel.getMarkerSet().contains(aName)) {
+            log_warn("Marker {} in {} measurement not found in {}.", aName, 
+                aMeasurementName, aModel.getName());
+            return SimTK::NaN;
+        }
     }
     const Marker& marker1 = aModel.getMarkerSet().get(aName1);
     const Marker& marker2 = aModel.getMarkerSet().get(aName2);
@@ -417,9 +416,11 @@ double ModelScaler::takeExperimentalMarkerMeasurement(const MarkerData& aMarkerD
         return length/(endIndex-startIndex+1);
     } else {
         if (marker1 < 0)
-            cout << "___WARNING___: marker " << aName1 << " in " << aMeasurementName << " measurement not found in " << aMarkerData.getFileName() << endl;
+            log_warn("Marker {} in {} measurement not found in {}.", aName1, 
+                    aMeasurementName, aMarkerData.getFileName());
         if (marker2 < 0)
-            cout << "___WARNING___: marker " << aName2 << " in " << aMeasurementName << " measurement not found in " << aMarkerData.getFileName() << endl;
+            log_warn("Marker {} in {} measurement not found in {}.", aName2,
+                    aMeasurementName, aMarkerData.getFileName());
         return SimTK::NaN;
     }
 }

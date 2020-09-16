@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Peter Loan                                                      *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -24,16 +24,14 @@
 //=============================================================================
 // INCLUDES
 //=============================================================================
-#include "SimTKsimbody.h"
 #include "WrapSphere.h"
-#include <OpenSim/Simulation/Model/PathPoint.h>
 #include "PathWrap.h"
 #include "WrapResult.h"
 #include "WrapMath.h"
 #include <OpenSim/Common/SimmMacros.h>
 #include <OpenSim/Common/Mtx.h>
-#include <sstream>
 #include <OpenSim/Common/ModelDisplayHints.h>
+#include <OpenSim/Common/ScaleSet.h>
 
 //=============================================================================
 // STATICS
@@ -50,12 +48,9 @@ static const char* wrapTypeName = "sphere";
 /**
  * Default constructor.
  */
-WrapSphere::WrapSphere() :
-    WrapObject(),
-   _radius(_radiusProp.getValueDbl())
+WrapSphere::WrapSphere()
 {
-    setNull();
-    setupProperties();
+    constructProperties();
 }
 
 //_____________________________________________________________________________
@@ -66,44 +61,28 @@ WrapSphere::~WrapSphere()
 {
 }
 
-//_____________________________________________________________________________
-/**
- * Copy constructor.
- *
- * @param aWrapSphere WrapSphere to be copied.
- */
-WrapSphere::WrapSphere(const WrapSphere& aWrapSphere) :
-    WrapObject(aWrapSphere),
-   _radius(_radiusProp.getValueDbl())
-{
-    setNull();
-    setupProperties();
-    copyData(aWrapSphere);
-}
-
 //=============================================================================
 // CONSTRUCTION METHODS
 //=============================================================================
 //_____________________________________________________________________________
 /**
- * Set the data members of this WrapSphere to their null values.
- */
-void WrapSphere::setNull()
-{
-}
-
-//_____________________________________________________________________________
-/**
  * Connect properties to local pointers.
  */
-void WrapSphere::setupProperties()
+void WrapSphere::constructProperties()
 {
-    // BASE CLASS
-    //WrapObject::setupProperties();
+    constructProperty_radius(0.05);
+}
 
-    _radiusProp.setName("radius");
-    _radiusProp.setValue(-1.0);
-    _propertySet.append(&_radiusProp);
+void WrapSphere::extendScale(const SimTK::State& s, const ScaleSet& scaleSet)
+{
+    Super::extendScale(s, scaleSet);
+
+    // Get scale factors (if an entry for the Frame's base Body exists).
+    const Vec3& scaleFactors = getScaleFactors(scaleSet, getFrame());
+    if (scaleFactors == ModelComponent::InvalidScaleFactors)
+        return;
+
+    upd_radius() *= (scaleFactors.sum() / 3.);
 }
 
 //_____________________________________________________________________________
@@ -113,47 +92,22 @@ void WrapSphere::setupProperties()
  *
  * @param aModel OpenSim model.
  */
-void WrapSphere::connectToModelAndBody(Model& aModel, PhysicalFrame& aBody)
+void WrapSphere::extendFinalizeFromProperties()
 {
     // Base class
-    Super::connectToModelAndBody(aModel, aBody);
+    Super::extendFinalizeFromProperties();
 
-   // maybe set a parent pointer, _body = aBody;
+    // maybe set a parent pointer, _body = aBody;
+    OPENSIM_THROW_IF_FRMOBJ(
+        get_radius() < 0,
+        InvalidPropertyValue,
+        getProperty_radius().getName(),
+        "Radius cannot be less than zero");
 
-    if (_radius < 0.0)
-    {
-        string errorMessage = "Error: radius for wrapSphere " + getName() + " was either not specified, or is negative.";
-        throw Exception(errorMessage);
-    }
 /*
     Sphere* sphere = new Sphere(_radius);
     setGeometryQuadrants(sphere);
 */
-}
-
-//_____________________________________________________________________________
-/**
- * Scale the sphere by the average of the three scale factors. The base class
- * scales the origin of the sphere in the body's reference frame.
- *
- * @param aScaleFactors The XYZ scale factors.
- */
-void WrapSphere::scale(const SimTK::Vec3& aScaleFactors)
-{
-   WrapObject::scale(aScaleFactors);
-
-   _radius *= (aScaleFactors.sum() / 3.0);
-}
-
-//_____________________________________________________________________________
-/**
- * Copy data members from one WrapSphere to another.
- *
- * @param aWrapSphere WrapSphere to be copied.
- */
-void WrapSphere::copyData(const WrapSphere& aWrapSphere)
-{
-    _radius = aWrapSphere._radius;
 }
 
 //_____________________________________________________________________________
@@ -178,7 +132,7 @@ const char* WrapSphere::getWrapTypeName() const
 string WrapSphere::getDimensionsString() const
 {
     stringstream dimensions;
-    dimensions << "radius " << _radius;
+    dimensions << "radius " << get_radius();
 
     return dimensions.str();
 }
@@ -191,24 +145,7 @@ string WrapSphere::getDimensionsString() const
  */
 double WrapSphere::getRadius() const
 {
-    return _radius;
-}
-
-//=============================================================================
-// OPERATORS
-//=============================================================================
-//_____________________________________________________________________________
-/**
- * Assignment operator.
- *
- * @return Reference to this object.
- */
-WrapSphere& WrapSphere::operator=(const WrapSphere& aWrapSphere)
-{
-    // BASE CLASS
-    WrapObject::operator=(aWrapSphere);
-
-    return(*this);
+    return get_radius();
 }
 
 //=============================================================================
@@ -265,12 +202,12 @@ int WrapSphere::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec
     }
 
    // check that neither point is inside the radius of the sphere
-    if (Mtx::Magnitude(3, p1m) < _radius || Mtx::Magnitude(3, p2m) < _radius)
+    if (Mtx::Magnitude(3, p1m) < get_radius() || Mtx::Magnitude(3, p2m) < get_radius())
       return insideRadius;
 
     a = Mtx::DotProduct(3, ri, ri);
    b = -2.0 * Mtx::DotProduct(3, mp, ri);
-   c = Mtx::DotProduct(3, mp, mp) - _radius * _radius;
+   c = Mtx::DotProduct(3, mp, mp) - get_radius() * get_radius();
    disc = b * b - 4.0 * a * c;
 
    // check if there is an intersection of p1p2 and the sphere
@@ -337,7 +274,7 @@ int WrapSphere::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec
       ra[i][2] = z[i];
    }
 
-    a1 = asin(_radius / Mtx::Magnitude(3, p1m));
+    a1 = asin(get_radius() / Mtx::Magnitude(3, p1m));
 
     WrapMath::Make3x3DirCosMatrix(a1, rrx);
     Mtx::Multiply(3, 3, 3, (double*)ra, (double*)rrx, (double*)aa);
@@ -365,7 +302,7 @@ int WrapSphere::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec
       ra[i][2] = z[i];
    }
 
-   a2 = asin(_radius / Mtx::Magnitude(3, p2m));
+   a2 = asin(get_radius() / Mtx::Magnitude(3, p2m));
    
    WrapMath::Make3x3DirCosMatrix(a2, rrx);
     Mtx::Multiply(3, 3, 3, (double*)ra, (double*)rrx, (double*)aa);
@@ -441,7 +378,7 @@ int WrapSphere::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec
    {
       if (DSIGN(aPoint1[_wrapAxis]) == _wrapSign || DSIGN(aPoint2[_wrapAxis]) == _wrapSign)
       {
-         double tt, r_squared = _radius * _radius;
+         double tt, r_squared = get_radius() * get_radius();
             Vec3 mm;
          // If either muscle point is on the constrained side, then check for intersection
          // of the muscle line and the cylinder. If there is an intersection, then
@@ -480,7 +417,7 @@ int WrapSphere::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec
          for (i = 0; i < 3; i++)
             sum_musc[i] = (origin[i] - aPoint1[i]) + (origin[i] - aPoint2[i]);
 
-            Mtx::Normalize(3, sum_musc, sum_musc);
+         Mtx::Normalize(3, sum_musc, sum_musc);
 
             if (Mtx::DotProduct(3, r1am, sum_musc) > Mtx::DotProduct(3, r1bm, sum_musc))
          {
@@ -512,7 +449,7 @@ int WrapSphere::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec
          for (i = 0; i < 3; i++)
             sum_musc[i] = (aWrapResult.r1[i] - aPoint1[i]) + (aWrapResult.r2[i] - aPoint2[i]);
 
-            Mtx::Normalize(3, sum_musc, sum_musc);
+         Mtx::Normalize(3, sum_musc, sum_musc);
 
             if (Mtx::DotProduct(3, sum_musc, wrapaxis) < 0.0)
          {
@@ -547,7 +484,7 @@ int WrapSphere::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec
    if (far_side_wrap)
         angle = -(2 * SimTK_PI - angle);
    
-   r1r2 = _radius * angle;
+   r1r2 = get_radius() * angle;
    aWrapResult.wrap_path_length = r1r2;
 
     Vec3 axis3;
@@ -599,16 +536,19 @@ void WrapSphere::generateDecorations(bool fixed, const ModelDisplayHints& hints,
 {
 
     Super::generateDecorations(fixed, hints, state, appendToThis);
-    if (fixed) return;
+    if (!fixed) return;
 
     if (hints.get_show_wrap_geometry()) {
-        const Vec3 color(SimTK::Cyan);
-        const SimTK::Transform& X_GB = getFrame().getTransformInGround(state);
-        SimTK::Transform X_GW = X_GB*getTransform();
+        const Appearance& defaultAppearance = get_Appearance();
+        if (!defaultAppearance.get_visible()) return;
+        const Vec3 color = defaultAppearance.get_color();
+        const auto X_BP = calcWrapGeometryTransformInBaseFrame();
         appendToThis.push_back(
             SimTK::DecorativeSphere(getRadius())
-            .setTransform(X_GW).setResolution(2.0)
-            .setColor(color).setOpacity(0.5));
+            .setTransform(X_BP).setResolution(2.0)
+            .setColor(color).setOpacity(defaultAppearance.get_opacity())
+            .setScale(1).setRepresentation(defaultAppearance.get_representation())
+            .setBodyId(getFrame().getMobilizedBodyIndex()));
     }
 
 

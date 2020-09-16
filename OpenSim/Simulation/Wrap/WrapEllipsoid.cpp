@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Peter Loan                                                      *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -24,15 +24,13 @@
 //=============================================================================
 // INCLUDES
 //=============================================================================
-#include "SimTKsimbody.h"
 #include "WrapEllipsoid.h"
-#include <OpenSim/Simulation/Model/PathPoint.h>
 #include "PathWrap.h"
 #include "WrapResult.h"
 #include <OpenSim/Common/SimmMacros.h>
 #include <OpenSim/Common/Mtx.h>
-#include <sstream>
 #include <OpenSim/Common/ModelDisplayHints.h>
+#include <OpenSim/Common/ScaleSet.h>
 
 //=============================================================================
 // STATICS
@@ -58,12 +56,9 @@ static const char* wrapTypeName = "ellipsoid";
 /**
 * Default constructor.
 */
-WrapEllipsoid::WrapEllipsoid() :
-   WrapObject(),
-   _dimensions(_dimensionsProp.getValueDblArray())
+WrapEllipsoid::WrapEllipsoid()
 {
-    setNull();
-    setupProperties();
+    constructProperties();
 }
 
 //_____________________________________________________________________________
@@ -74,45 +69,20 @@ WrapEllipsoid::~WrapEllipsoid()
 {
 }
 
-//_____________________________________________________________________________
-/**
-* Copy constructor.
-*
-* @param aWrapEllipsoid WrapEllipsoid to be copied.
-*/
-WrapEllipsoid::WrapEllipsoid(const WrapEllipsoid& aWrapEllipsoid) :
-   WrapObject(aWrapEllipsoid),
-   _dimensions(_dimensionsProp.getValueDblArray())
-{
-    setNull();
-    setupProperties();
-    copyData(aWrapEllipsoid);
-}
-
 //=============================================================================
 // CONSTRUCTION METHODS
 //=============================================================================
 //_____________________________________________________________________________
 /**
-* Set the data members of this WrapEllipsoid to their null values.
-*/
-void WrapEllipsoid::setNull()
-{
-}
-
-//_____________________________________________________________________________
-/**
 * Connect properties to local pointers.
 */
-void WrapEllipsoid::setupProperties()
+void WrapEllipsoid::constructProperties()
 {
     // BASE CLASS
     //WrapObject::setupProperties();
 
-    const double defaultDimensions[] = {-1.0, -1.0, -1.0};
-    _dimensionsProp.setName("dimensions");
-    _dimensionsProp.setValue(3, defaultDimensions);
-    _propertySet.append(&_dimensionsProp);
+    SimTK::Vec3 defaultDimensions = {0.05, 0.05, 0.05};
+    constructProperty_dimensions(defaultDimensions);
 }
 
 //_____________________________________________________________________________
@@ -120,18 +90,16 @@ void WrapEllipsoid::setupProperties()
 * Perform some set up functions that happen after the
 * object has been deserialized or copied.
 *
-* @param aModel 
+* @param aModel
 */
-void WrapEllipsoid::connectToModelAndBody(Model& aModel, PhysicalFrame& aBody)
+void WrapEllipsoid::extendFinalizeFromProperties()
 {
     // Base class
-    WrapObject::connectToModelAndBody(aModel, aBody);
+    WrapObject::extendFinalizeFromProperties();
 
-    // maybe set a parent pointer, _body = aBody;
-
-    if (_dimensions[0] < 0.0 || _dimensions[1] < 0.0 || _dimensions[2] < 0.0)
+    if (get_dimensions()[0] <= 0.0 || get_dimensions()[1] <= 0.0 || get_dimensions()[2] <= 0.0)
     {
-        string errorMessage = "Error: dimensions for WrapEllipsoid " + getName() + " were either not specified, or are negative.";
+        string errorMessage = "Error: Dimensions the WrapEllipsoid radii cannot be less than or equal to 0.";
         throw Exception(errorMessage);
     }
 /*
@@ -141,42 +109,29 @@ void WrapEllipsoid::connectToModelAndBody(Model& aModel, PhysicalFrame& aBody)
 */
 }
 
-//_____________________________________________________________________________
-/**
- * Scale the ellipsoid's dimensions. The base class scales the origin
- * of the ellipsoid in the body's reference frame.
- *
- * @param aScaleFactors The XYZ scale factors.
- */
-void WrapEllipsoid::scale(const SimTK::Vec3& aScaleFactors)
+void WrapEllipsoid::extendScale(const SimTK::State& s, const ScaleSet& scaleSet)
 {
-   // Base class, to scale origin in body frame
-   WrapObject::scale(aScaleFactors);
+    Super::extendScale(s, scaleSet);
 
-    SimTK::Vec3 localScaleVector[3];
+    // Get scale factors (if an entry for the Frame's base Body exists).
+    const Vec3& scaleFactors = getScaleFactors(scaleSet, getFrame());
+    if (scaleFactors == ModelComponent::InvalidScaleFactors)
+        return;
 
-   // _pose.x() holds the ellipsoid's X axis expressed in the
-   // body's reference frame. The magnitude of this-vector-multiplied-
-   // by-the-XYZ-scale-factors gives the amount that you need to
-   // scale the X dimension of the ellipsoid. Similarly for Y and Z...
-    for (int i=0; i<3; i++) {
-        localScaleVector[0][i] = _pose.x()[i] * aScaleFactors[i];
-        localScaleVector[1][i] = _pose.y()[i] * aScaleFactors[i];
-        localScaleVector[2][i] = _pose.z()[i] * aScaleFactors[i];
-    }
-    for (int i=0; i<3; i++)
-        _dimensions[i] *= localScaleVector[i].norm();
-}
+    // _pose.x() holds the ellipsoid's X-axis expressed in the body's reference
+    // frame. The elementwise product of this vector and the scaleFactors vector
+    // gives the amount that the ellipsoid must be scaled in the X dimension.
+    // Similar for the Y and Z dimensions.
+    Vec3 localScaleVector[3];
 
-//_____________________________________________________________________________
-/**
-* Copy data members from one WrapEllipsoid to another.
-*
-* @param aWrapEllipsoid WrapEllipsoid to be copied.
-*/
-void WrapEllipsoid::copyData(const WrapEllipsoid& aWrapEllipsoid)
-{
-    _dimensions = aWrapEllipsoid._dimensions;
+    localScaleVector[0] = _pose.x().elementwiseMultiply(scaleFactors);
+    localScaleVector[1] = _pose.y().elementwiseMultiply(scaleFactors);
+    localScaleVector[2] = _pose.z().elementwiseMultiply(scaleFactors);
+
+    SimTK::Vec3 previousDimensions(get_dimensions());
+    for (int i = 0; i < 3; ++i)
+        previousDimensions[i] *= localScaleVector[i].norm();
+    set_dimensions(previousDimensions);
 }
 
 //_____________________________________________________________________________
@@ -201,7 +156,7 @@ const char* WrapEllipsoid::getWrapTypeName() const
 string WrapEllipsoid::getDimensionsString() const
 {
     stringstream dimensions;
-    dimensions << "radius " << _dimensions[0] << " " << _dimensions[1] << " " << _dimensions[2];
+    dimensions << "radius " << get_dimensions()[0] << " " << get_dimensions()[1] << " " << get_dimensions()[2];
 
     return dimensions.str();
 }
@@ -214,24 +169,7 @@ string WrapEllipsoid::getDimensionsString() const
  */
 SimTK::Vec3 WrapEllipsoid::getRadii() const
 {
-    return SimTK::Vec3(_dimensions[0], _dimensions[1], _dimensions[2]);
-}
-
-//=============================================================================
-// OPERATORS
-//=============================================================================
-//_____________________________________________________________________________
-/**
-* Assignment operator.
-*
-* @return Reference to this object.
-*/
-WrapEllipsoid& WrapEllipsoid::operator=(const WrapEllipsoid& aWrapEllipsoid)
-{
-    // BASE CLASS
-    WrapObject::operator=(aWrapEllipsoid);
-
-    return(*this);
+    return get_dimensions();
 }
 
 //=============================================================================
@@ -282,14 +220,14 @@ int WrapEllipsoid::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::
     // the ellipsoid dimensions because they do not change from one call to the
     // next. You don't want the factor to change because the algorithm uses
     // some vectors (r1, r2, c1) from the previous call.
-    aWrapResult.factor = 3.0 / (_dimensions[0] + _dimensions[1] + _dimensions[2]);
+    aWrapResult.factor = 3.0 / get_dimensions().sum();
 
     for (i = 0; i < 3; i++)
     {
         p1[i] = aPoint1[i] * aWrapResult.factor;
         p2[i] = aPoint2[i] * aWrapResult.factor;
         m[i]  = origin[i] * aWrapResult.factor;
-        a[i]  = _dimensions[i] * aWrapResult.factor;
+        a[i]  = get_dimensions()[i] * aWrapResult.factor;
     }
 
     p1e = -1.0;
@@ -1082,7 +1020,7 @@ double WrapEllipsoid::findClosestPoint(double a, double b, double c,
 
                for (j = 0; j < 3; j++)
                    if (j != i)
-                       ellipseRadiiSum += _dimensions[j];
+                       ellipseRadiiSum += get_dimensions()[j];
 
                if (minEllipseRadiiSum > ellipseRadiiSum)
                {
@@ -1133,12 +1071,14 @@ double WrapEllipsoid::findClosestPoint(double a, double b, double c,
             t = max*sqrt(u*u+v*v+w*w);
         }
 
+        double P{ 0 }, P2{ 0 }, Q{ 0 }, Q2{ 0 }, R{ 0 }, _R2{ 0 };
+        double PQ{ 0 }, PR{ 0 }, QR{ 0 }, PQR{ 0 }, fp{ 0 };
+
         for (i = 0; i < 64; i++)
         {
-            double P = t+a2, P2 = P*P;
-            double Q = t+b2, Q2 = Q*Q;
-            double R = t+c2, _R2 = R*R;
-            double PQ, PR, QR, PQR, fp;
+            P = t+a2, P2 = P*P;
+            Q = t+b2, Q2 = Q*Q;
+            R = t+c2, _R2 = R*R;
 
             f = P2*Q2*_R2 - a2u2*Q2*_R2 - b2v2*P2*_R2 - c2w2*P2*Q2;
         
@@ -1303,17 +1243,20 @@ void WrapEllipsoid::generateDecorations(bool fixed, const ModelDisplayHints& hin
 {
 
     Super::generateDecorations(fixed, hints, state, appendToThis);
-    if (fixed) return;
+    if (!fixed) return;
 
     if (hints.get_show_wrap_geometry()) {
-        const Vec3 color(SimTK::Cyan);
-
-        const SimTK::Transform& X_GB = getFrame().getTransformInGround(state);
-        SimTK::Transform X_GW = X_GB*getTransform();
+        const Appearance& defaultAppearance = get_Appearance();
+        if (!defaultAppearance.get_visible()) return;
+        const Vec3 color = defaultAppearance.get_color();
+        
+        const auto X_BP = calcWrapGeometryTransformInBaseFrame();
         appendToThis.push_back(
             SimTK::DecorativeEllipsoid(getRadii())
-            .setTransform(X_GW).setResolution(2.0)
-            .setColor(color).setOpacity(0.5));
+            .setTransform(X_BP).setResolution(2.0)
+            .setColor(color).setOpacity(defaultAppearance.get_opacity())
+            .setScale(1).setRepresentation(defaultAppearance.get_representation())
+            .setBodyId(getFrame().getMobilizedBodyIndex()));
     }
 
 }

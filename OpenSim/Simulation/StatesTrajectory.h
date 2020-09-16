@@ -9,7 +9,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2016 Stanford University and the Authors                     *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Chris Dembia                                                    *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -24,12 +24,16 @@
  * -------------------------------------------------------------------------- */
 
 #include <vector>
-#include <Simbody.h>
 
 #include <OpenSim/Common/Exception.h>
 #include <OpenSim/Common/TimeSeriesTable.h>
+#include <SimTKcommon/internal/IteratorRange.h>
 
 #include "osimSimulationDLL.h"
+
+namespace SimTK {
+class State;
+}
 
 namespace OpenSim {
 
@@ -40,20 +44,22 @@ class Model;
 // users are likely to be interested in a more general State container that
 // doesn't assume the states are sequential in time.
 
-/** A sequence of SimTK::State%s that can be saved to a plain-text OSTATES
- * file.  The trajectory can also be populated from such a file. You may obtain
- * a StatesTrajectory from a simulation, or other numerical methods whose task
- * is to produce a trajectory of states. Users can modify the trajectory by
- * appending states to it, but users cannot modify the individual states that
- * are already in the trajectory.
+// TODO See the bottom of this file for a class description to use once the
+// OSTATES file format is implemented.
+//
+/** This class holds a sequence of SimTK::State%s. You can obtain a
+ * StatesTrajectory during a simulation via the StatesTrajectoryReporter. You
+ * can also create a StatesTrajectory from a states storage (.sto) file (see
+ * createFromStatesStorage()). Users can modify a trajectory by appending
+ * states to it, but users cannot modify the individual states that are already
+ * in a trajectory.
  *
  * This class was introduced in OpenSim version 4.0, and enables scripting
  * (Python/MATLAB) and C++ users to postprocess their results with greater ease
- * and more versatility than with an Analysis.
+ * and flexibility than with an Analysis.
  *
- * @note This class is a work in progress. The ability to read and write a
- * StatesTrajectory to an OSTATES is not available yet, even though the
- * documentation is written as if this ability exists.
+ * @note In a future release, we plan to support an OSTATES file format that
+ * allows one to write the trajectory to a file with full numerical precision.
  *
  * ### Guarantees
  * This class is designed to ensure the following:
@@ -62,21 +68,21 @@ class Model;
  * - All states in the trajectory are consistent with each other (see
  *   isConsistent()).
  *
- * @note These gaurantees apply when using this class through C++, Java,
+ * @note These guarantees apply when using this class through C++, Java,
  * or the %OpenSim GUI, but **not** through Python or MATLAB. This is because
  * Python and MATLAB do not enforce constness and thus allow modifying the
  * trajectory.
  *
  * ### Using with a %Model 
  * A StatesTrajectory is not very useful on its own, since neither the
- * trajectory nor the contained states know of the names that the Component%s
- * give to the state variables. You probably want to use the trajectory with an
+ * trajectory nor the contained states know how the Component%s name the state
+ * variables they create. You probably want to use the trajectory with an
  * OpenSim::Model, through which the state variables have a meaning (e.g.,
  * `model.getStateVariableValue(states[0], "soleus_r/activation")`).
  *
  * SimTK::State%s have a tight association with a specific OpenSim::Model
  * (actually, with the SimTK::System within an OpenSim::Model). However,
- * neither the StatesTrajectory nor the OSTATES file knows the model to which
+ * the StatesTrajectory does not know anything about the model to which
  * it corresponds. So, for example, you could use a single StatesTrajectory
  * with a generic gait2392 model as well as with a scaled (subject-specific)
  * gait2392 model. This flexibility may be beneficial in some scenarios, but
@@ -86,32 +92,6 @@ class Model;
  *
  * To increase your confidence that a StatesTrajectory matches a given Model,
  * you can perform some weak checks with isCompatibleWith().
- *
- * ### File format
- * StatesTrajectory files use the file extension `.ostates`, with the XML
- * format. Therefore, you could theoretically edit a StatesTrajectory file in
- * a typical text editing program, or in Python/MATLAB using XML libraries
- * (such a process is is likely to be painful; consider using the
- * createFromStatesStorage() utility instead).
- *
- * A SimTK::State object contains many different types of data, but only some
- * are saved into the OSTATES file:
- * 
- * type of data                 | saved in OSTATES?
- * ---------------------------- | -----------------
- * (continuous) state variables | yes
- * discrete state variables     | yes
- * modeling options             | yes
- * cache variables              | no
- *
- * The cache variables (e.g., total system mass, control signals) are not saved
- * to the OSTATES file because they can be computed from the state variables
- * and are not necessary for describing the state of the system (see
- * Component::addStateVariable).
- *
- * %OpenSim Object%s (Model OSIM files, Tool setup files) also use an
- * XML format, but that format is *completely unrelated* to the XML format used
- * for OSTATES files.
  *
  * ### Usage
  * Here are a few basic things you can do with a StatesTrajectory, assuming you
@@ -228,8 +208,8 @@ public:
     /** Clear all the states in the trajectory. */
     void clear();
     /** Append a SimTK::State to this trajectory.
-     * This function ensures that the time in the new SimTK::State is
-     * greater than the time in the last SimTK::State in the trajectory.
+     * This function ensures that the time in the new SimTK::State is greater
+     * than or equal to the time in the last SimTK::State in the trajectory.
      *
      * The state that ends up in the trajectory is a deep copy of the one
      * passed in.
@@ -270,13 +250,10 @@ public:
     bool isConsistent() const;
 
     /** Weak check for if the trajectory can be used with the given model.
-     * Returns true if the trajectory isConsistent() and if the following
-     * quantities are the same:
-     * - number of model state variables and number of Y's in the state 
-     * - number of coordinates in the model and number of Q's in state
-     * - number of speeds in the model and number of U's in state
+     * Returns true if the trajectory isConsistent() and if the number of speeds
+     * in the model matches the number of U's in state.
      *
-     * Returns false otherwise. This method **cannot** gaurantee that the
+     * Returns false otherwise. This method **cannot** guarantee that the
      * trajectory will work with the given model, and makes no attempt to
      * determine if the trajectory was generated with the given model.
      */
@@ -285,7 +262,7 @@ public:
 
     /** Export the continuous state variables to a data table, perhaps to write
      * to a file and postprocess in MATLAB/Python/Excel. The names of the
-     * columns in the table will be the full names of the continuous state
+     * columns in the table will be the absolute names of the continuous state
      * variables (e.g., `knee/flexion/angle`).
      *
      * You must provide a model that is compatible with this trajectory,
@@ -293,7 +270,7 @@ public:
      *
      * By default, all continuous state variables are written to the table
      * (one per column). If you only want some of them to be written to the
-     * table, use the `stateVars` argument to specify their full names
+     * table, use the `stateVars` argument to specify their absolute names
      * (e.g., `knee/flexion/angle`).
      *
      * @code
@@ -341,19 +318,19 @@ public:
     };
 #endif
 
-    /** Thrown when trying to create a StatesTrajectory from a states Storage,
-     * and the Storage does not contain a column for every continuous state
+    /** Thrown when trying to create a StatesTrajectory from states data,
+     * and the data does not contain a column for every continuous state
      * variable. */
-    class MissingColumnsInStatesStorage : public OpenSim::Exception {
+    class MissingColumns : public OpenSim::Exception {
     public:
-        MissingColumnsInStatesStorage(const std::string& file, size_t line,
+        MissingColumns(const std::string& file, size_t line,
                 const std::string& func,
                 const std::string& modelName,
                 std::vector<std::string> missingStates) :
                 OpenSim::Exception(file, line, func) {
             std::string msg = "The following ";
             msg += std::to_string(missingStates.size()) + " states from Model '";
-            msg += modelName + "' are missing from the states Storage:\n";
+            msg += modelName + "' are missing from the data:\n";
             for (unsigned i = 0; i < (missingStates.size() - 1); ++i) {
                 msg += "    " + missingStates[i] + "\n";
             }
@@ -363,13 +340,12 @@ public:
         }
     };
     
-    /** Thrown when trying to create a StatesTrajectory from a states Storage, and
-     * the Storage contains columns that do not correspond to continuous state
-     * variables.
-     * */
-    class ExtraColumnsInStatesStorage : public OpenSim::Exception {
+    /** Thrown when trying to create a StatesTrajectory from states data, and
+     * the data contains columns that do not correspond to continuous state
+     * variables. */
+    class ExtraColumns : public OpenSim::Exception {
     public:
-        ExtraColumnsInStatesStorage(
+        ExtraColumns(
                 const std::string& file, size_t line,
                 const std::string& func,
                 const std::string& modelName,
@@ -386,20 +362,11 @@ public:
             addMessage(msg);
         }
     };
-    
+
     /** Thrown by createFromStatesStorage(). */
-    class NonUniqueColumnsInStatesStorage : public OpenSim::Exception {
+    class DataIsInDegrees : public OpenSim::Exception {
     public:
-        NonUniqueColumnsInStatesStorage(const std::string& file, size_t line,
-                const std::string& func) : OpenSim::Exception(file, line, func) {
-            addMessage("States Storage column labels are not unique.");
-        }
-    };
-    
-    /** Thrown by createFromStatesStorage(). */
-    class StatesStorageIsInDegrees : public OpenSim::Exception {
-    public:
-        StatesStorageIsInDegrees(const std::string& file, size_t line,
+        DataIsInDegrees(const std::string& file, size_t line,
                 const std::string& func) : OpenSim::Exception(file, line, func) {
             addMessage("States Storage is in degrees, but this is inappropriate "
                     "for creating a StatesTrajectory. Edit the Storage so that "
@@ -407,91 +374,102 @@ public:
                     "no in the header.");
         }
     };
-    
-    /** Thrown by createFromStatesStorage(). */
-    class VaryingNumberOfStatesPerRow : public OpenSim::Exception {
-    public:
-        VaryingNumberOfStatesPerRow(const std::string& file, size_t line,
-                const std::string& func,
-                int numDepColumns, int smallestNumStates) :
-                    OpenSim::Exception(file, line, func) {
-            std::string msg = "States Storage has varying number of entries ";
-            msg += "per row (from " + std::to_string(smallestNumStates) + " to ";
-            msg += std::to_string(numDepColumns) + "). You must provide a ";
-            msg += "States Storage that has the same number ";
-            msg += "of entires in every row.";
-            addMessage(msg);
-        }
-    };
 
-    /// @name Create partial trajectory from pre-4.0 files
+    /// @name Create partial trajectory from a states table
     /// @{
-    /** Create a partial trajectory of States from a (pre-4.0) states Storage
-     * object. The resulting StatesTrajectory will restore continuous state
-     * variable values, but not discrete state variable values, modeling
-     * option values, etc. Also, keep in mind that states Storage files usually
-     * do not contain the state values to full precision, and thus cannot
-     * exactly reproduce results from the initial state trajectory; constraints
-     * may not be satisfied, etc.
-     * 
-     * #### History
+
+    /**
+     * This function is identical to createFromStatesTable() except that this
+     * function accepts a Storage instead of a TimeSeriesTable.
+     */
+    // TODO When OSTATES support is complete, add the following blurb to
+    // the doxygen block above.
+    /* #### History
      * Before OpenSim 4.0, the only way to save states to a file was as
      * a Storage file, typically called a states storage file and named
      * `*_states.sto`. You can use this function to create a StatesTrajectory
      * from such a Storage file. OpenSim 4.0 introduced the ability to save and
      * read a complete StatesTrajectory to/from an OSTATES file, and so this
-     * function should only be used when you are stuck with pre-4.0 files.
+     * function should only be used when you are stuck with pre-4.0 files. */
+    static StatesTrajectory createFromStatesStorage(const Model& model,
+            const Storage& sto,
+            bool allowMissingColumns = false,
+            bool allowExtraColumns = false,
+            bool assemble = false);
+
+    /** Create a partial trajectory of States from a states table.
+     * The resulting StatesTrajectory will restore continuous state
+     * variable values, but not discrete state variable values, modeling
+     * option values, etc. Also, keep in mind that states files usually
+     * do not contain the state values to full precision, and thus cannot
+     * exactly reproduce results from the initial state trajectory. Lastly,
+     * this function optionally modifies each state to obey any constraints in
+     * the model (by calling Model::assemble()).
+     *
+     * The states in the resulting trajectory will be realized to
+     * SimTK::Stage::Instance. You should not use the resulting trajectory with
+     * an instance of the model other than the one you passed to this function
+     * (the state contains Instance-stage cache variables that are pointers to
+     * objects in the model; e.g., force elements).
      *
      * @note The naming convention for state variables changed in OpenSim v4.0;
      * `ankle_r/ankle_angle_r/speed` used to be `ankle_angle_r_u`,
      * `soleus_r/activation` used to be `soleus_r.activation`, etc. This
-     * function can handle %Storage column labels that use the pre-v4.0 naming
+     * function can handle column labels that use the pre-v4.0 naming
      * convention.
-     * 
+     *
      * @param model The Model to which the states belong. A Model is necessary
-     *      since the storage file lists the state variables by name.
-     * @param sto The Storage object containing state values.
+     *      because the data file lists the state variables by name.
+     * @param table The table containing state values.
      * @param allowMissingColumns If false, throws exception if there are
      *      continuous state variables in the Model for which there is no
-     *      column in the Storage. If true, no exception is thrown but such
+     *      column in the table. If true, no exception is thrown but such
      *      state variables are set to NaN.
      * @param allowExtraColumns If false, throws exception if there are
-     *      columns in the Storage that do not correspond to continuous state
-     *      variables in the Model. If true, such columns of the Storage are
+     *      columns in the table that do not correspond to continuous state
+     *      variables in the Model. If true, such columns of the table are
      *      ignored.
+     * @param assemble Modify state variable values to satisfy
+     *      kinematic constraints (by calling Model::assemble()).
+     *      Use this option if the provided states are incomplete (for example,
+     *      the values for dependent coordinates are unspecified).
+     *      Caution: enforcing constraints can drastically alter the
+     *      provided states if they do not already obey the constraints.
+     *      Do not use this option with results from a forward simulation: the
+     *      states trajectory from a forward simulation may not meet the
+     *      model's assembly accuracy, and therefore assembling could
+     *      alter the trajectory and cause inconsistency between coordinate
+     *      values and speeds.
      *
      * #### Usage
      * Here is how you might use this function in python:
      * @code{.py}
      * import opensim
      * model = opensim.Model("subject01.osim")
-     * model.initSystem()
-     * sto = opensim.Storage("subject01_states.sto")
-     * states = opensim.StatesTrajectory.createFromStatesStorage(model, sto)
+     * table = opensim.TimeSeriesTable("subject01_states.sto")
+     * states = opensim.StatesTrajectory.createFromStatesTable(model, table)
      * print(states[0].getTime())
      * print(model.getStateVariableValue(states[0], "knee/flexion/value"))
      * @endcode
-     * 
-     * @throws MissingColumnsInStatesStorage See the description of the
+     *
+     * @throws MissingColumns See the description of the
      *      `allowMissingColumns` argument.
-     * 
-     * @throws ExtraColumnsInStatesStorage See the description of the
+     *
+     * @throws ExtraColumns See the description of the
      *      `allowExtraColumns` argument.
      *
-     * @throws NonUniqueColumnsInStatesStorage Thrown if multiple columns in
-     *      the Storage have the same name.
-     * 
-     * @throws StatesStorageIsInDegrees Thrown if the Storage is in degrees
+     * @throws NonUniqueLabels Thrown if multiple columns in
+     *      the table have the same name.
+     *
+     * @throws DataIsInDegrees Thrown if the table is in degrees
      *      (inDegrees=yes); angular quantities must use radians to properly
      *      create the trajectory.
-     *
-     * @throws VaryingNumberOfStatesPerRow Thrown if the rows of the storage
-     *      don't all have the same number of entries.
      */
-    static StatesTrajectory createFromStatesStorage(const Model& model,
-            const Storage& sto,
+    static StatesTrajectory createFromStatesTable(const Model& model,
+            const TimeSeriesTable& table,
             bool allowMissingColumns = false,
-            bool allowExtraColumns = false);
+            bool allowExtraColumns = false,
+            bool assemble = false);
 
     /** Convenience form of createFromStatesStorage() that takes the path to a
      * Storage file instead of a Storage object. This convenience form uses the
@@ -502,5 +480,61 @@ public:
 };
 
 } // namespace
+
+// TODO The following class description should be revisited when support for
+// OSTATES files is completed.
+/* This class holds a sequence of SimTK::State%s that can be saved to a
+ * plain-text OSTATES file.  The trajectory can also be populated from such a
+ * file. You may obtain a StatesTrajectory from a simulation, or other
+ * numerical methods whose task is to produce a trajectory of states. Users can
+ * modify the trajectory by appending states to it, but users cannot modify the
+ * individual states that are already in the trajectory.
+ *
+ * This class was introduced in OpenSim version 4.0, and enables scripting
+ * (Python/MATLAB) and C++ users to postprocess their results with greater ease
+ * and more versatility than with an Analysis.
+ *
+ * @note This class is a work in progress. The ability to read and write a
+ * StatesTrajectory to an OSTATES is not available yet, even though the
+ * documentation is written as if this ability exists.
+ *
+ * ### Guarantees
+ * This class is designed to ensure the following:
+ * - The states are ordered nondecreasing in time (adjacent states *can* have
+ *   the same time).
+ * - All states in the trajectory are consistent with each other (see
+ *   isConsistent()).
+ *
+ * @note These guarantees apply when using this class through C++, Java,
+ * or the %OpenSim GUI, but **not** through Python or MATLAB. This is because
+ * Python and MATLAB do not enforce constness and thus allow modifying the
+ * trajectory.
+ *
+ * ### File format
+ * StatesTrajectory files use the file extension `.ostates`, with the XML
+ * format. Therefore, you could theoretically edit a StatesTrajectory file in
+ * a typical text editing program, or in Python/MATLAB using XML libraries
+ * (such a process is is likely to be painful; consider using the
+ * createFromStatesStorage() utility instead).
+ *
+ * A SimTK::State object contains many different types of data, but only some
+ * are saved into the OSTATES file:
+ * 
+ * type of data                 | saved in OSTATES?
+ * ---------------------------- | -----------------
+ * (continuous) state variables | yes
+ * discrete state variables     | yes
+ * modeling options             | yes
+ * cache variables              | no
+ *
+ * The cache variables (e.g., total system mass, control signals) are not saved
+ * to the OSTATES file because they can be computed from the state variables
+ * and are not necessary for describing the state of the system (see
+ * Component::addStateVariable).
+ *
+ * %OpenSim Object%s (Model OSIM files, Tool setup files) also use an
+ * XML format, but that format is *completely unrelated* to the XML format used
+ * for OSTATES files.
+ */
 
 #endif // OPENSIM_STATES_TRAJECTORY_H_

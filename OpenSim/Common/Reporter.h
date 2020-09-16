@@ -9,8 +9,8 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2016 Stanford University and the Authors                *
- * Author(s): Ajay Seth                                        *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
+ * Author(s): Ajay Seth                                                       *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
  * not use this file except in compliance with the License. You may obtain a  *
@@ -113,6 +113,44 @@ public:
     OpenSim_DECLARE_LIST_INPUT(inputs, InputT, SimTK::Stage::Report,
         "Variable list of quantities to be reported.");
 
+    //==========================================================================
+    // PUBLIC METHODS
+    //==========================================================================
+
+    /** Connect an output (single-valued or list) to this reporter. 
+    The output must be of type InputT.
+    If the output is a list output, this connects to all of the channels of the
+    output. You can optionally provide an alias that will be used by this
+    component to refer to the output; the alias will be used for all channels
+    of the output.                                          
+    @code
+    auto* reporter = new ConsoleReporter();
+    auto* src = new TableSource();
+    reporter->addToReport(src->getOutput("all_columns"));
+    @endcode
+    This method is equivalent to
+    connectInput_inputs(const AbstractOutput&, const std::string&). */
+    void addToReport(const AbstractOutput& output,
+                     const std::string& alias = "") {
+        connectInput_inputs(output, alias);
+    }
+
+    /** Connect an output channel to this reporter.
+    The output channel must be of type InputT.
+    You can optionally provide an alias that will be used by this component to
+    refer to the channel.
+    @code
+    auto* reporter = new ConsoleReporter();
+    auto* src = new TableSource();
+    reporter->addToReport(src->getOutput("column").getChannel("ankle"));
+    @endcode
+    This method is equivalent to
+    connectInput_inputs(const AbstractChannel&, const std::string&). */
+    void addToReport(const AbstractChannel& channel,
+                     const std::string& alias = "") {
+        connectInput_inputs(channel, alias);
+    }
+
 protected:
     /** Default constructor sets up Reporter-level properties; can only be
     called from a derived class constructor. **/
@@ -144,47 +182,74 @@ public:
     TableReporter_() = default;
     virtual ~TableReporter_() = default;
 
-    const TimeSeriesTable_<ValueT>& getReport() const {
+    /** Retrieve the report as a TimeSeriesTable.                             */
+    const TimeSeriesTable_<ValueT>& getTable() const {
         return _outputTable;
+    }
+
+    /** Clear the report. This can be used for example in loops performing 
+    simulation. Each new iteration should start with an empty report and so this
+    function can be used to clear the report at the end of each iteration.    */
+    void clearTable() {
+        std::vector<std::string> columnLabels;
+        // Handle the case where no outputs were connected to the reporter.
+        if (_outputTable.hasColumnLabels()) {
+            columnLabels = _outputTable.getColumnLabels();
+        }
+        _outputTable = TimeSeriesTable_<ValueT>{};
+        if (!columnLabels.empty()) {
+            _outputTable.setColumnLabels(columnLabels);
+        }
     }
 
 protected:
     void implementReport(const SimTK::State& state) const override {
         const auto& input = this->template getInput<InputT>("inputs");
-        SimTK::RowVector_<ValueT> result(int(input.getNumConnectees()));
+        SimTK::RowVector_<ValueT> result;
+        result.resize(int(input.getNumConnectees()));
 
         for (auto idx = 0u; idx < input.getNumConnectees(); ++idx) {
               const auto& chan = input.getChannel(idx);
               const auto& value = chan.getValue(state);
               result[idx] = value;
         }
-        const_cast<Self*>(this)->_outputTable.appendRow(state.getTime(), result);
+        try {
+            const_cast<Self*>(this)->_outputTable.appendRow(state.getTime(),
+                                                            result);
+        } catch(const InvalidTimestamp& exception) {
+            OPENSIM_THROW(Exception,
+                          "Attempting to update reporter with rows having "
+                          "invalid timestamps. Hint: If running simulation in "
+                          "a loop, use clearTable() to clear table at the end "
+                          "of each loop.\n\n" + std::string{exception.what()});
+        }
     }
 
-
-    void extendConnect(Component& root) override {
-        Super::extendConnect(root);
+    void extendFinalizeConnections(Component& root) override {
+        Super::extendFinalizeConnections(root);
 
         const auto& input = this->template getInput<InputT>("inputs");
 
         std::vector<std::string> labels;
         for (auto idx = 0u; idx < input.getNumConnectees(); ++idx) {
-            // Always set the label to the full path name.
-            // TODO: Currently, a default annotation is set by Input::connect()
-            //       if none was provided by the user. Because the user may have
-            //       explicitly specified an annotation equal to the default, it
-            //       is impossible to determine whether the annotation should be
-            //       used here instead of the full path name.
-            labels.push_back( input.getChannel(idx).getPathName() );
+            labels.push_back( input.getLabel(idx) );
         }
-        const_cast<Self*>(this)->_outputTable.setColumnLabels(labels);
+        if (!labels.empty()) {
+            const_cast<Self*>(this)->_outputTable.setColumnLabels(labels);
+        } else {
+            std::cout << "Warning: No outputs were connected to '"
+                      << this->getName() << "' of type "
+                      << getConcreteClassName() << ". You can connect outputs "
+                      "by calling addToReport()." << std::endl;
+
+        }
     }
 
 private:
 
     // Hold the output values in a table with values as columns and time rows
     // We write to this table in const methods, but only because we ensure
-    // those consts methods are never called with trial intergrator states.
+    // those const methods are never called with trial integrator states.
     TimeSeriesTable_<ValueT> _outputTable;
 };
 
@@ -212,36 +277,69 @@ private:
             const_cast<ConsoleReporter_<T>*>(this)->_printCount = 0;
         }
 
-        if (_printCount % 40 == 0) {
-            std::cout << "[" << this->getName() << "] " << "\n";
-            std::cout << std::setw(_width) << "time" << "| ";
-            for (auto idx = 0u; idx < input.getNumConnectees(); ++idx) {
-                // Always set the label to the Input's annotation, which will be
-                // either the annotation provided by the user or a default
-                // annotation set by Input::connect().
-                const auto& outName = input.getAnnotation(idx);
-                const auto& truncName = 
-                    static_cast<int>(outName.size()) <= _width ?
-                    outName : outName.substr(outName.size() - _width);
-                std::cout << std::setw(_width) << truncName << "|";
-            }
-            std::cout << "\n";
+        // Find the length of the longest label.
+        int lengthOfLongestLabel = 0;
+        for (auto idx = 0u; idx < input.getNumConnectees(); ++idx) {
+            lengthOfLongestLabel = std::max(
+                    lengthOfLongestLabel,
+                                    (int)input.getLabel(idx).size());
         }
+
+        // Periodically display column headers.
+        if (_printCount % 40 == 0) {
+            log_cout("[{}]", this->getName());
+
+            // Split labels over multiple lines.
+            // Round up to the nearest multiple of _width to determine the
+            // number of header rows.
+            const int numHeaderRows = (lengthOfLongestLabel -1) / _width + 1;
+
+            // Display labels in chunks of size _width.
+            for (int row = 0; row < numHeaderRows; ++row)
+            {
+                std::string msg;
+
+                // Time column.
+                if (row == numHeaderRows-1)
+                    msg += fmt::format("{:>{}}| ", "time", _width);
+                else
+                    msg += fmt::format("{:>{}}| ", "", _width);
+
+                // Data columns.
+                for (auto idx = 0u; idx < input.getNumConnectees(); ++idx) {
+                    const auto& outName = input.getLabel(idx);
+                    const std::string lbl =
+                        std::string(numHeaderRows*_width - outName.size(), ' ')
+                        + outName;
+                    msg += fmt::format("{}| ", lbl.substr(_width*row, _width));
+                }
+                log_cout(msg);
+            }
+
+            // Horizontal rule.
+            std::string msg;
+            for (auto idx = 0u; idx <= input.getNumConnectees(); ++idx)
+                msg += std::string(_width, '-') + "| ";
+            log_cout(msg);
+        }
+
         // TODO set width based on number of significant digits.
-        std::cout << std::setw(_width) << state.getTime() << "| ";
+        std::string msg;
+        msg += fmt::format("{:>{}}| ", state.getTime(), _width);
         for (const auto& chan : input.getChannels()) {
             const auto& value = chan->getValue(state);
             const auto& nSigFigs = chan->getOutput().getNumberOfSignificantDigits();
-            std::cout << std::setw(_width)
-                << std::setprecision(nSigFigs) << value << "|";
+            // Print `value` right-justified in a column with width `_width`,
+            // using `nSigFigs`: {:>{_width}.{nSigFigs}g}
+            msg += fmt::format("{:>{}.{}g}| ", value, _width, nSigFigs);
         }
-        std::cout << std::endl;
+        log_cout(msg);
 
         const_cast<ConsoleReporter_<T>*>(this)->_printCount++;
     }
 
     unsigned int _printCount = 0;
-    int _width = 12;
+    int _width = 14;
 };
 
 // specialization where InputT is Vector_<T> and ValueT is Real
@@ -254,7 +352,7 @@ inline void TableReporter_<SimTK::Vector, SimTK::Real>::
     
     if (_outputTable.getNumRows() == 0) {
         std::vector<std::string> labels;
-        const std::string& base = input.getChannel(0).getName();
+        const std::string& base = input.getLabel(0);
         for (int ix = 0; ix < result.size(); ++ix) {
             labels.push_back(base + "[" + std::to_string(ix)+"]");
         }

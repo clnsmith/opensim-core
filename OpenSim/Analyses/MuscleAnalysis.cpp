@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Katherine R. S. Holzbaur, Frank C. Anderson, Ajay Seth,         *
  *            Matthew Millard                                                 *
  *                                                                            *
@@ -28,11 +28,6 @@
 //=============================================================================
 #include <OpenSim/Common/IO.h>
 #include <OpenSim/Simulation/Model/Model.h>
-#include <OpenSim/Simulation/Model/Muscle.h>
-#include <OpenSim/Simulation/Model/Actuator.h>
-#include <OpenSim/Simulation/SimbodyEngine/Coordinate.h>
-#include <OpenSim/Simulation/Model/CoordinateSet.h>
-#include <OpenSim/Simulation/Model/ForceSet.h>
 #include "MuscleAnalysis.h"
 
 using namespace OpenSim;
@@ -182,17 +177,15 @@ void MuscleAnalysis::constructDescription()
 {
     char descrip[1024];
 
-    strcpy(descrip,"\nThis analysis gathers basic information about muscles ");
-    strcat(descrip,"during a simulation (e.g., forces, tendon lengths,"
+    strcpy(descrip, "\nThis analysis gathers basic information about muscles ");
+    strcat(descrip, "during a simulation (e.g., forces, tendon lengths,"
         " moment arms, etc).");
 
-    strcat(descrip,"\nUnits are S.I. units (second, meters, Newtons, ...)");
-    if(getInDegrees()) {
-        strcat(descrip,"\nAngles are in degrees.");
-    } else {
-        strcat(descrip,"\nAngles are in radians.");
-    }
-    strcat(descrip,"\n\n");
+    strcat(descrip, "\nUnits are S.I. units (second, meters, Newtons, ...)");
+    strcat(descrip, "\nIf the header above contains a line with ");
+    strcat(descrip, "'inDegrees', this indicates whether rotational values ");
+    strcat(descrip, "are in degrees (yes) or radians (no).");
+    strcat(descrip, "\n\n");
     setDescription(descrip);
 }
 //_____________________________________________________________________________
@@ -227,8 +220,9 @@ void MuscleAnalysis::allocateStorageObjects()
             while(i <_coordinateList.getSize()){
                 int found = qSet.getIndex(_coordinateList[i]);
                 if(found < 0){
-                    cout << "MuscleAnalysis: WARNING - coordinate ";
-                    cout << _coordinateList[i] << " is not part of model." << endl;
+                    log_warn("MuscleAnalysis: coordinate {} is not part of the "
+                             "model.",
+                            _coordinateList[i]);
                     _coordinateList.remove(i);
                 }
                 else{
@@ -548,9 +542,9 @@ int MuscleAnalysis::record(const SimTK::State& s)
         }
         catch (const std::exception& e) {
             if(!lengthWarning){
-                cout << "WARNING- MuscleAnalysis::record() unable to evaluate ";
-                cout << "muscle length at time " << s.getTime() << " for reason: ";
-                cout << e.what() << endl;
+                log_warn("MuscleAnalysis::record() unable to evaluate muscle "
+                         "length at time {} for reason: {}", s.getTime(),
+                         e.what());
                 lengthWarning = true;
             }
             continue;
@@ -569,9 +563,9 @@ int MuscleAnalysis::record(const SimTK::State& s)
         }
         catch (const std::exception& e) {
             if(!forceWarning){
-                cout << "WARNING- MuscleAnalysis::record() unable to evaluate ";
-                cout << "muscle forces at time " << s.getTime() << " for reason: ";
-                cout << e.what() << endl;
+                log_warn("MuscleAnalysis::record() unable to evaluate muscle "
+                         "forces at time {} for reason: {}",
+                        s.getTime(), e.what());
                 forceWarning = true;
             }
             continue;
@@ -597,9 +591,9 @@ int MuscleAnalysis::record(const SimTK::State& s)
             }
             catch (const std::exception& e) {
                 if(!dynamicsWarning){
-                    cout << "WARNING- MuscleAnalysis::record() unable to evaluate ";
-                    cout << "muscle forces at time " << s.getTime() << " for reason: ";
-                    cout << e.what() << endl;
+                    log_warn("MuscleAnalysis::record() unable to evaluate "
+                             "muscle forces at time {} for reason: {}",
+                             s.getTime(), e.what());
                     dynamicsWarning = true;
                 }
             continue;
@@ -608,9 +602,9 @@ int MuscleAnalysis::record(const SimTK::State& s)
     }
     else {
         if(!dynamicsWarning){
-            cout << "WARNING- MuscleAnalysis::record() unable to evaluate ";
-            cout << "muscle dynamics at time " << s.getTime() << " because ";
-            cout << "model has no mass and system dynamics cannot be computed." << endl;
+            log_warn("MuscleAnalysis::record() unable to evaluate muscle "
+                     "dynamics at time {} because model has no mass and system "
+                     "dynamics cannot be computed.");
             dynamicsWarning = true;
         }
     }
@@ -687,7 +681,7 @@ int MuscleAnalysis::record(const SimTK::State& s)
  *
  * @return -1 on error, 0 otherwise.
  */
-int MuscleAnalysis::begin(SimTK::State& s )
+int MuscleAnalysis::begin(const SimTK::State&s )
 {
     if(!proceed()) return 0;
 
@@ -711,8 +705,11 @@ int MuscleAnalysis::begin(SimTK::State& s )
         int nq = _momentArmStorageArray.getSize();
         for(int i=0; i<nq; i++) {
             q = _momentArmStorageArray[i]->q;
-            if (q->getLocked(s))
-                cout << "MuscleAnalysis: WARNING - coordinate " << q->getName() << " is locked and can't be varied." << endl; 
+            if (q->getLocked(s)) {
+                log_warn("MuscleAnalysis: coordinate {} is locked and can't be "
+                         "varied.",
+                        q->getName());
+            }
         }
     }
     if(_storageList.getSize()> 0 && _storageList.get(0)->getSize() <= 0) status = record(s);
@@ -758,7 +755,7 @@ int MuscleAnalysis::step(const SimTK::State& s, int stepNumber )
  *
  * @return -1 on error, 0 otherwise.
  */
-int MuscleAnalysis::end(SimTK::State& s )
+int MuscleAnalysis::end(const SimTK::State& s )
 {
     if (!proceed()) return 0;
     record(s);
@@ -783,7 +780,7 @@ printResults(const string &aBaseName,const string &aDir,double aDT,
                  const string &aExtension)
 {
     if(!getOn()) {
-        printf("MuscleAnalysis.printResults: Off- not printing.\n");
+        log_info("MuscleAnalysis.printResults: Off- not printing.");
         return 0;
     }
 

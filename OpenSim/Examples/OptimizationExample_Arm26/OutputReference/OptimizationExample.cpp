@@ -7,8 +7,8 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
- * Author(s): Samuel R. Hamner, Ajay Seth                                                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
+ * Author(s): Samuel R. Hamner, Ajay Seth                                     *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
  * not use this file except in compliance with the License. You may obtain a  *
@@ -79,7 +79,7 @@ class ExampleOptimizationSystem : public OptimizerSystem {
         manager.integrate(s);
 
         /* Calculate the scalar quantity we want to minimize or maximize. 
-        *  In this case, we’re maximizing forward velocity of the 
+        *  In this case, we're maximizing forward velocity of the
         *  forearm/hand mass center, so to maximize, compute velocity 
         *  and multiply it by -1.
         */

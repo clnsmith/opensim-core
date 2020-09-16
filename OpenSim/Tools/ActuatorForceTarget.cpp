@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
  * not use this file except in compliance with the License. You may obtain a  *
@@ -28,14 +28,9 @@
 //==============================================================================
 // INCLUDES
 //==============================================================================
-#include <iostream>
-#include <OpenSim/Common/Exception.h>
-#include <OpenSim/Simulation/Model/Actuator.h>
-#include <OpenSim/Simulation/Model/ForceSet.h>
-#include "CMC.h"
 #include "ActuatorForceTarget.h"
+#include "CMC.h"
 #include "CMC_TaskSet.h"
-#include <SimTKmath.h>
 #include <SimTKlapack.h>
 #include "StateTrackingTask.h"
 
@@ -209,13 +204,13 @@ prepareToOptimize(SimTK::State& s, double *x)
     // Test lapack solution
     //
     SimTK::Vector answer(nf, b);
-    std::cout << "Result from dgglse: " << info << ", rank " << rank << ": " << std::endl << answer << std::endl;
+    log_info("Result from dgglse: {}, rank {}: {}", info, rank, answer);
     double p = (_accelPerformanceMatrix * answer + _accelPerformanceVector).normSqr() + (_forcePerformanceMatrix * answer + _forcePerformanceVector).normSqr();
-    std::cout << "Performance: " << p << std::endl;
-    std::cout << "Violated bounds:\n";
+    log_info("Performance: {}", p);
+    log_warn("Violated bounds: ");
     ForceSet& Force = model->getForceSet();
     for(int i=0; i<nf; i++) if(answer[i]<_lowerBounds[i] || answer[i]>_upperBounds[i])
-        std::cout << i << " (" << fSet.get(i).getName() << ") got " << answer[i] << ", bounds are (" << _lowerBounds[i] << "," << _upperBounds[i] << ")" << std::endl;
+        log_warn("{} ({}) got {}, bounds are ({},{})", i, fSet.get(i).getName(), answer[i], _lowerBounds[i], _upperBounds[i]);
 #endif
 
 #endif

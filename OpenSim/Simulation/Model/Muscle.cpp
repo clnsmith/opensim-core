@@ -7,7 +7,7 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2012 Stanford University and the Authors                *
+ * Copyright (c) 2005-2017 Stanford University and the Authors                *
  * Author(s): Peter Loan, Ajay Seth                                           *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -26,14 +26,8 @@
 //=============================================================================
 #include "Muscle.h"
 
-#include <OpenSim/Simulation/SimbodyEngine/Body.h>
-#include <OpenSim/Simulation/SimbodyEngine/SimbodyEngine.h>
-#include "ConditionalPathPoint.h"
-#include "PointForceDirection.h"
 #include "GeometryPath.h"
-
 #include "Model.h"
-
 #include <OpenSim/Common/XMLDocument.h>
 
 //=============================================================================
@@ -43,7 +37,8 @@ using namespace std;
 using namespace OpenSim;
 using SimTK::Vec3;
 
-//static int counter=0;
+static const Vec3 DefaultMuscleColor(.8, .1, .1); // Red for backward compatibility
+
 //=============================================================================
 // CONSTRUCTOR
 //=============================================================================
@@ -52,9 +47,6 @@ using SimTK::Vec3;
 Muscle::Muscle()
 {
     constructProperties();
-    // override the value of default _minControl, _maxControl
-    setMinControl(0.0);
-    setMaxControl(1.0);
 }
 
 //_____________________________________________________________________________
@@ -63,8 +55,7 @@ Muscle::Muscle()
 void Muscle::updateFromXMLNode(SimTK::Xml::Element& aNode, int versionNumber)
 {
     if ( versionNumber < XMLDocument::getLatestVersion()) {
-        if (Object::getDebugLevel()>=1)
-            cout << "Updating Muscle object to latest format..." << endl;
+        log_debug("Updating Muscle object to latest format...");
         
         if (versionNumber <= 20301){
             SimTK::Xml::element_iterator pathIter = 
@@ -102,6 +93,46 @@ void Muscle::updateFromXMLNode(SimTK::Xml::Element& aNode, int versionNumber)
             }
             XMLDocument::renameChildNode(aNode, "pennation_angle", "pennation_angle_at_optimal");
         }
+        if (versionNumber < 30513) {
+            SimTK::Xml::element_iterator minControlElt =
+                aNode.element_begin("min_control");
+            double minControl = 0;
+            if (minControlElt != aNode.element_end()) {
+                minControlElt->getValueAs<double>(minControl);
+                // If the min_control value is 0, then remove the min_control
+                // property in XML since it is likely a result of a mistake. In
+                // previous versions, the min_control property was no updated
+                // to reflect the Muscle's min_activation. Removing it allows
+                // the Muscle to use the appropriate default specified by the
+                // derived concrete Muscle.
+                if (SimTK::isNumericallyEqual(minControl, 0.0)) {
+                    aNode.removeNode(minControlElt);
+                }
+            }
+            SimTK::Xml::element_iterator maxControlElt =
+                aNode.element_begin("max_control");
+            double maxControl = 0;
+            if (maxControlElt != aNode.element_end()) {
+                maxControlElt->getValueAs<double>(maxControl);
+                // allow Muscle to use its default
+                if (SimTK::isNumericallyEqual(maxControl, 1.0)) {
+                    aNode.removeNode(maxControlElt);
+                }
+            }
+        }
+        if (versionNumber < 30516) {
+            // Find GeometryPath node and insert <default_color>
+            SimTK::Xml::element_iterator  geomPathIter = aNode.element_begin("GeometryPath");
+            if (geomPathIter != aNode.element_end()) {
+                SimTK::Xml::element_iterator  defaultColorIter = geomPathIter->element_begin("default_color");
+                if (defaultColorIter == geomPathIter->element_end()) {
+                    SimTK::Xml::Element myDefaultColorEement("default_color");
+                    myDefaultColorEement.setValue(".8 .1 .1"); // DefaultMuscleColor
+                    geomPathIter->appendNode(myDefaultColorEement);
+                }
+            }
+        }
+
     }
     // Call base class now assuming aNode has been corrected for current version
     Super::updateFromXMLNode(aNode, versionNumber);
@@ -121,6 +152,11 @@ void Muscle::constructProperties()
     constructProperty_max_contraction_velocity(10.0);
     constructProperty_ignore_tendon_compliance(false);
     constructProperty_ignore_activation_dynamics(false);
+
+    // By default the min and max controls on muscle are 0.0 and 1.0
+    setMinControl(0.0);
+    setMaxControl(1.0);
+    upd_GeometryPath().setDefaultColor(DefaultMuscleColor);
 }
 
 
@@ -188,14 +224,10 @@ void Muscle::extendConnectToModel(Model& aModel)
     //              both the position and velocity of the multibody system and
     //              the muscles path before solving for the fiber length and
     //              velocity in the reduced model.
-    addCacheVariable<Muscle::MuscleLengthInfo>
-       ("lengthInfo", MuscleLengthInfo(), SimTK::Stage::Velocity);
-    addCacheVariable<Muscle::FiberVelocityInfo>
-       ("velInfo", FiberVelocityInfo(), SimTK::Stage::Velocity);
-    addCacheVariable<Muscle::MuscleDynamicsInfo>
-       ("dynamicsInfo", MuscleDynamicsInfo(), SimTK::Stage::Dynamics);
-    addCacheVariable<Muscle::MusclePotentialEnergyInfo>
-       ("potentialEnergyInfo", MusclePotentialEnergyInfo(), SimTK::Stage::Velocity);
+    this->_lengthInfoCV = addCacheVariable("lengthInfo", MuscleLengthInfo(), SimTK::Stage::Velocity);
+    this->_velInfoCV = addCacheVariable("velInfo", FiberVelocityInfo(), SimTK::Stage::Velocity);
+    this->_dynamicsInfoCV = addCacheVariable("dynamicsInfo", MuscleDynamicsInfo(), SimTK::Stage::Dynamics);
+    this->_potentialEnergyInfoCV = addCacheVariable("potentialEnergyInfo", MusclePotentialEnergyInfo(), SimTK::Stage::Velocity);
  }
 
 void Muscle::extendSetPropertiesFromState(const SimTK::State& state)
@@ -387,7 +419,7 @@ double Muscle::getActiveFiberForce(const SimTK::State& s) const
     return getMuscleDynamicsInfo(s).activeFiberForce;
 }
 
-/* get the current passive fiber force (N) passive_force_length relationship */
+/* get the total force applied by all passive elements in the fiber (N) */
 double Muscle::getPassiveFiberForce(const SimTK::State& s) const 
 {
     return getMuscleDynamicsInfo(s).passiveFiberForce;
@@ -399,7 +431,8 @@ double Muscle::getActiveFiberForceAlongTendon(const SimTK::State& s) const
     return getMuscleDynamicsInfo(s).activeFiberForce * getMuscleLengthInfo(s).cosPennationAngle;
 }
 
-/* get the current passive fiber force (N) projected onto the tendon direction */
+/* get the total force applied by all passive elements in the fiber (N)
+   projected onto the tendon direction */
 double Muscle::getPassiveFiberForceAlongTendon(const SimTK::State& s) const 
 {
     return getMuscleDynamicsInfo(s).passiveFiberForce * getMuscleLengthInfo(s).cosPennationAngle;
@@ -474,79 +507,75 @@ void Muscle::setExcitation(SimTK::State& s, double excitation) const
 /* Access to muscle calculation data structures */
 const Muscle::MuscleLengthInfo& Muscle::getMuscleLengthInfo(const SimTK::State& s) const
 {
-    if(!isCacheVariableValid(s,"lengthInfo")){
-        MuscleLengthInfo &umli = updMuscleLengthInfo(s);
-        calcMuscleLengthInfo(s, umli);
-        markCacheVariableValid(s,"lengthInfo");
-        // don't bother fishing it out of the cache since 
-        // we just calculated it and still have a handle on it
-        return umli;
+    if (isCacheVariableValid(s, _lengthInfoCV)) {
+        return getCacheVariableValue(s, _lengthInfoCV);
     }
-    return getCacheVariableValue<MuscleLengthInfo>(s, "lengthInfo");
+
+    MuscleLengthInfo& umli = updCacheVariableValue(s, _lengthInfoCV);
+    calcMuscleLengthInfo(s, umli);
+    markCacheVariableValid(s, _lengthInfoCV);
+    return umli;
 }
 
 Muscle::MuscleLengthInfo& Muscle::updMuscleLengthInfo(const SimTK::State& s) const
 {
-    return updCacheVariableValue<MuscleLengthInfo>(s, "lengthInfo");
+    return updCacheVariableValue(s, _lengthInfoCV);
 }
 
 const Muscle::FiberVelocityInfo& Muscle::
 getFiberVelocityInfo(const SimTK::State& s) const
 {
-    if(!isCacheVariableValid(s,"velInfo")){
-        FiberVelocityInfo& ufvi = updFiberVelocityInfo(s);
-        calcFiberVelocityInfo(s, ufvi);
-        markCacheVariableValid(s,"velInfo");
-        // don't bother fishing it out of the cache since 
-        // we just calculated it and still have a handle on it
-        return ufvi;
+    if (isCacheVariableValid(s, _velInfoCV)) {
+        return getCacheVariableValue(s, _velInfoCV);
     }
-    return getCacheVariableValue<FiberVelocityInfo>(s, "velInfo");
+
+    FiberVelocityInfo& ufvi = updCacheVariableValue(s, _velInfoCV);
+    calcFiberVelocityInfo(s, ufvi);
+    markCacheVariableValid(s, _velInfoCV);
+    return ufvi;
 }
 
 Muscle::FiberVelocityInfo& Muscle::
 updFiberVelocityInfo(const SimTK::State& s) const
 {
-    return updCacheVariableValue<FiberVelocityInfo>(s, "velInfo");
+    return updCacheVariableValue(s, _velInfoCV);
 }
 
 const Muscle::MuscleDynamicsInfo& Muscle::
 getMuscleDynamicsInfo(const SimTK::State& s) const
 {
-    if(!isCacheVariableValid(s,"dynamicsInfo")){
-        MuscleDynamicsInfo& umdi = updMuscleDynamicsInfo(s);
-        calcMuscleDynamicsInfo(s, umdi);
-        markCacheVariableValid(s,"dynamicsInfo");
-        // don't bother fishing it out of the cache since 
-        // we just calculated it and still have a handle on it
-        return umdi;
+    if (isCacheVariableValid(s, _dynamicsInfoCV)) {
+        return getCacheVariableValue(s, _dynamicsInfoCV);
     }
-    return getCacheVariableValue<MuscleDynamicsInfo>(s, "dynamicsInfo");
+
+    MuscleDynamicsInfo& umdi = updCacheVariableValue(s, _dynamicsInfoCV);
+    calcMuscleDynamicsInfo(s, umdi);
+    markCacheVariableValid(s, _dynamicsInfoCV);
+    return umdi;
 }
 Muscle::MuscleDynamicsInfo& Muscle::
 updMuscleDynamicsInfo(const SimTK::State& s) const
 {
-    return updCacheVariableValue<MuscleDynamicsInfo>(s, "dynamicsInfo");
+    return updCacheVariableValue(s, _dynamicsInfoCV);
 }
 
 const Muscle::MusclePotentialEnergyInfo& Muscle::
 getMusclePotentialEnergyInfo(const SimTK::State& s) const
 {
-    if(!isCacheVariableValid(s,"potentialEnergyInfo")){
-        MusclePotentialEnergyInfo& umpei = updMusclePotentialEnergyInfo(s);
-        calcMusclePotentialEnergyInfo(s, umpei);
-        markCacheVariableValid(s,"potentialEnergyInfo");
-        // don't bother fishing it out of the cache since 
-        // we just calculated it and still have a handle on it
-        return umpei;
+    if (isCacheVariableValid(s, _potentialEnergyInfoCV)) {
+        return getCacheVariableValue(s, _potentialEnergyInfoCV);
     }
-    return getCacheVariableValue<MusclePotentialEnergyInfo>(s, "potentialEnergyInfo");
+
+    MusclePotentialEnergyInfo& umpei = updCacheVariableValue(s, _potentialEnergyInfoCV);
+    calcMusclePotentialEnergyInfo(s, umpei);
+    markCacheVariableValid(s, _potentialEnergyInfoCV);
+    return umpei;
 }
 
 Muscle::MusclePotentialEnergyInfo& Muscle::
 updMusclePotentialEnergyInfo(const SimTK::State& s) const
 {
-    return updCacheVariableValue<MusclePotentialEnergyInfo>(s, "potentialEnergyInfo");
+    return updCacheVariableValue(s, _potentialEnergyInfoCV);
 }
 
 
@@ -622,15 +651,17 @@ void Muscle::computeForce(const SimTK::State& s,
                           SimTK::Vector_<SimTK::SpatialVec>& bodyForces, 
                           SimTK::Vector& generalizedForces) const
 {
-    Super::computeForce(s, bodyForces, generalizedForces); // Calls compute actuation.
+    // This calls compute actuation.
+    Super::computeForce(s, bodyForces, generalizedForces); 
 
-    // NOTE: Actuation could be negative, in particular during CMC, when the optimizer
-    // is computing gradients, but in those cases the actuation will be 
-    // overridden and will not be computed by the muscle
+    if (getDebugLevel() < 0) return;
+    // NOTE: Actuation could be negative, in particular during CMC, when the 
+    // optimizer is computing gradients, but in those cases the actuation will 
+    // be overridden and will not be computed by the muscle.
     if (!isActuationOverridden(s) && (getActuation(s) < -SimTK::SqrtEps)) {
         string msg = getConcreteClassName()
             + "::computeForce, muscle "+ getName() + " force < 0";
-        cout << msg << " at time = " << s.getTime() << endl;
+        log_debug("{}  at time = ", msg, s.getTime());
         //throw Exception(msg);
     }
 }
